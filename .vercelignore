@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+
+# Build outputs
+frontend/dist/
+.mypy_cache/
+.ruff_cache/
+
+# Sensitive files
+.env
+.env.local
+.env.*.local
+
+# WhatsApp session data
+gateway/.wwebjs_auth/
+gateway/.wwebjs_cache/
+
+# Database files
+backend/data/
+
+# Logs
+*.log
+backend/backend.out.log
+backend/backend.err.log
+frontend/frontend.out.log
+frontend/frontend.err.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Gateway (won't work on Vercel)
+gateway/node_modules/

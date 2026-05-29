@@ -1,0 +1,146 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+* {
+  scrollbar-color: rgba(255, 255, 255, 0.06) transparent;
+  scrollbar-width: thin;
+}
+*::-webkit-scrollbar { width: 5px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 10px; }
+
+body {
+  background: #09090b;
+  background-image:
+    radial-gradient(ellipse 50% 40% at 20% 0%, rgba(34, 197, 94, 0.04), transparent),
+    radial-gradient(ellipse 50% 40% at 80% 100%, rgba(139, 92, 246, 0.03), transparent);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer components {
+  .wa-panel {
+    background: rgba(15, 15, 20, 0.8);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 16px;
+  }
+
+  .wa-panel-solid {
+    background: rgba(15, 15, 20, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 16px;
+  }
+
+  .wa-btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all duration-150;
+  }
+
+  .wa-btn-primary {
+    @apply wa-btn text-black font-semibold;
+    background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+    box-shadow: 0 2px 12px rgba(34, 197, 94, 0.25);
+  }
+  .wa-btn-primary:hover {
+    box-shadow: 0 4px 20px rgba(34, 197, 94, 0.4);
+    transform: translateY(-1px);
+  }
+  .wa-btn-primary:active { transform: translateY(0); }
+  .wa-btn-primary:disabled { opacity: 0.35; transform: none; box-shadow: none; }
+
+  .wa-btn-ghost {
+    @apply wa-btn text-wa-subtext;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .wa-btn-ghost:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: #fafafa;
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+
+  .wa-input {
+    @apply w-full rounded-xl px-4 py-3 text-sm text-wa-text outline-none transition-all duration-150;
+    background: rgba(24, 24, 32, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .wa-input::placeholder { color: #3f3f46; }
+  .wa-input:focus {
+    border-color: rgba(34, 197, 94, 0.3);
+    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.06);
+  }
+
+  .glass-card {
+    background: rgba(255, 255, 255, 0.02);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 12px;
+  }
+
+  .gradient-text {
+    background: linear-gradient(135deg, #22c55e, #8b5cf6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .status-dot {
+    @apply h-1.5 w-1.5 rounded-full;
+    background: #22c55e;
+    box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+  }
+
+  .chat-item {
+    @apply relative flex items-center gap-3 px-4 py-3 transition-all duration-150 cursor-pointer rounded-xl mx-2;
+  }
+  .chat-item:hover { background: rgba(255, 255, 255, 0.03); }
+  .chat-item.active { background: rgba(34, 197, 94, 0.06); }
+
+  .msg-ai {
+    background: rgba(24, 24, 32, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    border-radius: 4px 16px 16px 16px;
+  }
+
+  .msg-user {
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(34, 197, 94, 0.05));
+    border: 1px solid rgba(34, 197, 94, 0.12);
+    border-radius: 16px 4px 16px 16px;
+  }
+
+  .template-card {
+    @apply relative cursor-pointer rounded-xl p-3 transition-all duration-150;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+  }
+  .template-card:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(34, 197, 94, 0.2);
+  }
+
+  .persona-tag {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium;
+    background: rgba(139, 92, 246, 0.1);
+    border: 1px solid rgba(139, 92, 246, 0.15);
+    color: #a78bfa;
+  }
+}
+
+/* Typing indicator */
+.typing-indicator span {
+  @apply inline-block h-2 w-2 rounded-full bg-wa-subtext;
+  animation: typing 1.4s ease-in-out infinite;
+}
+.typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+.typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes typing {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-4px); }
+}
