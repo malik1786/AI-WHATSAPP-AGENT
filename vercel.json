@@ -19,10 +19,5 @@
       "src": "/(.*)",
       "dest": "/frontend/$1"
     }
-  ],
-  "env": {
-    "GROQ_API_KEY": "@groq-api-key",
-    "GATEWAY_TOKEN": "@gateway-token",
-    "BACKEND_API_TOKEN": "@backend-api-token"
-  }
+  ]
 }
