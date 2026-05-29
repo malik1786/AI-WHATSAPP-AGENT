@@ -86,6 +86,19 @@ def init_schema(conn: sqlite3.Connection) -> None:
     except sqlite3.OperationalError:
         pass  # column already exists
 
+    # Migrate: add reply_count, max_replies, coupon_code, is_unlimited columns
+    for col, default in [
+        ("reply_count", "0"),
+        ("max_replies", "15"),
+        ("coupon_code", "NULL"),
+        ("is_unlimited", "0"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE users ADD COLUMN {col} INTEGER DEFAULT {default};")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # column already exists
+
     conn.commit()
 
 

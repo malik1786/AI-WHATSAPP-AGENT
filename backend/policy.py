@@ -100,11 +100,29 @@ DATE_PATTERNS = [
 
 # Casual keywords
 CASUAL_KEYWORDS = {
+    # English
     "hi", "hello", "hey", "how are you", "whats up", "what's up",
     "thanks", "thank you", "bye", "good morning", "good night",
     "good evening", "howdy", "sup", "yo", "hola", "salam",
     "jazakallah", "shukriya", "alhamdulillah", "ok", "okay",
     "nice", "great", "awesome", "cool", "wow", "haha", "lol",
+    "yes", "no", "yeah", "nope", "sure", "fine", "good", "bad",
+    "hmm", "huh", "oh", "wow", "oops", "sorry", "np", "nvm",
+    "bye", "see you", "tc", "take care", "miss you", "love you",
+    # Hindi/Urdu casual
+    "acha", "achha", "accha", "theek hai", "ok hai", "thik hai",
+    "arre", "are", "oye", "yaar", "bhai", "dost",
+    "kya", "kaise", "kaisa", "kaisi", "kahan", "kab",
+    "nahi", "haan", "ji", "haan ji", "nahi ji",
+    "chal", "chalo", "aaja", "aao", "ruk", "ruko",
+    "bas", "bus", "ab", "abhi", "phir", "fir",
+    "sahi", "galat", "theek", "bura", "achha",
+    "wah", "wah wah", "kya baat", "mast", "badhiya",
+    "samajh", "pata", "malum", "maloom",
+    "bhej", "bhejo", "bheja", "bhejiye",
+    "bol", "bolo", "bola", "boliye",
+    "sun", "suno", "suna", "sunaiye",
+    "dekh", "dekho", "dekha", "dekhiye",
 }
 
 # Factual question patterns
@@ -175,6 +193,7 @@ def classify_message(text: str, is_group: bool) -> str:
         return "decision"
 
     t = text.strip().lower()
+    words = t.split()
 
     # Check coupon code first
     if t.startswith("coupon "):
@@ -185,8 +204,12 @@ def classify_message(text: str, is_group: bool) -> str:
         if re.search(pattern, t):
             return "time"
 
-    # Check casual
+    # Check exact match or startswith for casual
     if t in CASUAL_KEYWORDS or any(t.startswith(k) for k in CASUAL_KEYWORDS):
+        return "casual"
+
+    # Short messages (1-3 words) without decision keywords = casual
+    if len(words) <= 3 and not any(kw in t for kw in DECISION_KEYWORDS):
         return "casual"
 
     # Check factual

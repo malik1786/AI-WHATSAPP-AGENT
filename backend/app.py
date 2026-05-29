@@ -29,7 +29,7 @@ from db import (
     apply_coupon_code,
 )
 from gateway_client import GatewayClient
-from ai_engine import GroqChat, plan_action, polish_whatsapp_message, answer_factual_question
+from ai_engine import GroqChat, plan_action, polish_whatsapp_message, answer_factual_question, is_valid_reply, init_validator, get_validator, init_confidence_scorer, get_confidence_scorer
 from policy import QuietHours, AwayMode, normalize_yes_no, extract_phone_like, to_wa_id_from_digits, parse_away_command, classify_message, answer_time_question, parse_coupon_code
 
 
@@ -49,6 +49,11 @@ _init_conn.close()
 
 gateway = GatewayClient(base_url=settings.gateway_base_url, token=settings.gateway_token)
 groq = GroqChat(api_key=settings.groq_api_key, model=settings.groq_model) if settings.groq_api_key else None
+
+# Initialize reply validator and confidence scorer
+if groq:
+    init_validator(groq.client, groq.model)
+    init_confidence_scorer(groq.client, groq.model)
 
 _cached_owner_name: str | None = None
 
@@ -318,7 +323,40 @@ def webhook():
         else:
             reply = "Hi! How can I help you?"
 
-        # Increment reply count after successful reply
+        # Validate reply before sending
+        if not is_valid_reply(reply):
+            print(f"[APP] Invalid reply detected: {reply!r}, using fallback")
+            reply = "Got it!"
+
+        # Check confidence score
+        scorer = get_confidence_scorer()
+        confidence = scorer.score(body, reply, msg_type)
+        print(f"[APP] Confidence: {confidence['score']}% ({confidence['level']}) - {confidence['reason']}")
+
+        # If confidence is low, ask for confirmation
+        if not confidence["should_auto_send"]:
+            confirm = (
+                f"I'm not sure how to reply to this.\n\n"
+                f"My draft: {reply}\n\n"
+                f"Reply YES to send, or NO to cancel."
+            )
+            try:
+                gateway.send(to=wa_from, text=confirm, simulate_typing=True)
+            except Exception:
+                pass
+            add_conversation(conn, wa_from, "out", confirm, message_id=None)
+            # Store as pending for confirmation
+            create_pending(
+                conn,
+                controller_wa_id=wa_from,
+                recipient_wa_id=wa_from,
+                original_request=body,
+                final_message=reply,
+                ttl_seconds=settings.pending_ttl_seconds,
+            )
+            return jsonify({"ok": True, "auto_replied": False, "confidence": confidence["score"]})
+
+        # High confidence - auto-send
         increment_reply_count(conn, wa_from)
 
         try:
@@ -326,7 +364,7 @@ def webhook():
         except Exception:
             pass
         add_conversation(conn, wa_from, "out", reply, message_id=None)
-        return jsonify({"ok": True, "auto_replied": True, "type": msg_type})
+        return jsonify({"ok": True, "auto_replied": True, "type": msg_type, "confidence": confidence["score"]})
 
     yn = normalize_yes_no(body)
     if yn is not None:
