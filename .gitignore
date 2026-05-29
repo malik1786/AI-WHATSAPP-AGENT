@@ -12,3 +12,11 @@ __pycache__/
 .venv/
 venv/
 env/
+.mypy_cache/
+.ruff_cache/
+
+## Database
+backend/data/
+
+## Logs
+*.log
