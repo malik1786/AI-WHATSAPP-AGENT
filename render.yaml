@@ -7,9 +7,9 @@ services:
     startCommand: cd gateway && node server.mjs
     envVars:
       - key: BACKEND_WEBHOOK_URL
-        sync: false
+        value: https://whatsapp-agent-bay.vercel.app/webhook
       - key: GATEWAY_TOKEN
-        sync: false
+        value: mysecrettoken123
       - key: GATEWAY_PORT
         value: 3001
       - key: WWEBJS_AUTH_PATH
