@@ -128,7 +128,9 @@ async function connectToWhatsApp() {
         connection,
         hasQr: !!qr,
         ldKeys: ld ? Object.keys(ld) : null,
-        ldOutput: ld?.output ? { statusCode: ld.output.statusCode, message: ld.output.message } : "no output",
+        ldErrorType: ld?.error?.constructor?.name ?? typeof ld?.error ?? "none",
+        ldErrorMsg: ld?.error?.message ?? String(ld?.error ?? "none"),
+        ldDate: ld?.date ?? "none",
       }));
 
       if (qr) {
@@ -142,11 +144,13 @@ async function connectToWhatsApp() {
       if (connection === "close") {
         ready = false;
         authenticated = false;
-        const statusCode = ld?.output?.statusCode;
-        const errorMsg = ld?.output?.error?.message ?? ld?.output?.error ?? null;
-        lastDisconnect = { at: new Date().toISOString(), reason: String(statusCode ?? "unknown") };
 
-        console.log("[WA] Connection closed. statusCode:", statusCode, "error:", errorMsg, "full:", JSON.stringify(ld?.output ?? "no output"));
+        const err = ld?.error;
+        const errorMsg = err?.message ?? String(err ?? "unknown");
+        const statusCode = err?.output?.statusCode ?? err?.statusCode ?? null;
+        lastDisconnect = { at: new Date().toISOString(), reason: errorMsg };
+
+        console.log("[WA] Connection closed. error:", errorMsg, "statusCode:", statusCode, "errType:", err?.constructor?.name, "full:", JSON.stringify(err ?? "no error"));
 
         const isLoggedOut = statusCode === DisconnectReason.loggedOut;
         const isConnectionReplaced = statusCode === DisconnectReason.connectionReplaced;
@@ -154,9 +158,11 @@ async function connectToWhatsApp() {
         const isRestartRequired = statusCode === DisconnectReason.restartRequired;
         const isMultideviceMismatch = statusCode === 411;
 
-        if (isLoggedOut || isBadSession || isMultideviceMismatch || statusCode === undefined) {
+        if (isLoggedOut || isBadSession || isMultideviceMismatch) {
           console.log("[WA] Clearing auth state (code:", statusCode, ")");
           clearAuthState(authDir);
+        } else if (statusCode === undefined) {
+          console.log("[WA] Network/connection error — keeping auth, will retry");
         }
 
         if (isLoggedOut || isConnectionReplaced) {
