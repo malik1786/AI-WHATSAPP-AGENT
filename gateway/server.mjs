@@ -1,9 +1,15 @@
 import express from "express";
 import qrcodeTerminal from "qrcode-terminal";
-import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } from "@whiskeysockets/baileys";
+import makeWASocket, {
+  useMultiFileAuthState,
+  DisconnectReason,
+  Browsers,
+  makeCacheableSignalKeyStore,
+} from "@whiskeysockets/baileys";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import pino from "pino";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -75,6 +81,17 @@ let lastDisconnect = null;
 let userInfo = null;
 const lastSentAtByRecipient = new Map();
 
+function clearAuthState(dir) {
+  try {
+    if (fs.existsSync(dir)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+      console.log("[WA] Cleared auth state from", dir);
+    }
+  } catch (e) {
+    console.error("[WA] Failed to clear auth state:", e?.message);
+  }
+}
+
 async function postWebhook(payload) {
   try {
     const res = await fetch(BACKEND_WEBHOOK_URL, {
@@ -94,19 +111,27 @@ async function postWebhook(payload) {
   }
 }
 
+let reconnectAttempts = 0;
+const MAX_RECONNECT_DELAY = 30000;
+
 async function connectToWhatsApp() {
   const authDir = AUTH_DIR;
   if (!fs.existsSync(authDir)) fs.mkdirSync(authDir, { recursive: true });
 
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
-  const { version } = await fetchLatestBaileysVersion();
+
+  const logger = pino({ level: "silent" });
 
   sock = makeWASocket({
-    version,
-    auth: state,
+    auth: {
+      creds: state.creds,
+      keys: makeCacheableSignalKeyStore(state.keys, logger),
+    },
     printQRInTerminal: false,
-    browser: ["WhatsApp Agent", "Chrome", "120.0"],
+    browser: Browsers.ubuntu("Chrome"),
     generateHighQualityLinkPreview: false,
+    logger,
+    getMessage: async () => undefined,
   });
 
   sock.ev.on("creds.update", saveCreds);
@@ -117,20 +142,46 @@ async function connectToWhatsApp() {
     if (qr) {
       lastQr = qr;
       ready = false;
+      reconnectAttempts = 0;
       console.log("\n[WA] Scan this QR code with WhatsApp:");
       qrcodeTerminal.generate(qr, { small: true });
     }
 
     if (connection === "close") {
       const statusCode = ld?.output?.statusCode;
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
       ready = false;
       authenticated = false;
       lastDisconnect = { at: new Date().toISOString(), reason: String(statusCode ?? "unknown") };
-      console.log("[WA] Connection closed:", statusCode, shouldReconnect ? "reconnecting..." : "logged out");
-      if (shouldReconnect) {
-        setTimeout(connectToWhatsApp, 3000);
+
+      const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+      const isConnectionReplaced = statusCode === DisconnectReason.connectionReplaced;
+      const isBadSession = statusCode === DisconnectReason.badSession;
+      const isRestartRequired = statusCode === DisconnectReason.restartRequired;
+      const isMultideviceMismatch = statusCode === 411;
+
+      console.log("[WA] Connection closed:", statusCode,
+        isLoggedOut ? "(logged out)" :
+        isConnectionReplaced ? "(replaced)" :
+        isBadSession ? "(bad session)" :
+        isRestartRequired ? "(restart required)" :
+        "(unknown)");
+
+      if (isLoggedOut || isBadSession || isMultideviceMismatch) {
+        console.log("[WA] Clearing stale auth state (code:", statusCode, ")");
+        clearAuthState(authDir);
       }
+
+      if (isLoggedOut || isConnectionReplaced) {
+        console.log("[WA] Stopped — not reconnecting.");
+        return;
+      }
+
+      reconnectAttempts++;
+      const delay = isRestartRequired
+        ? 1000
+        : Math.min(3000 * reconnectAttempts, MAX_RECONNECT_DELAY);
+      console.log(`[WA] Reconnecting in ${delay}ms (attempt ${reconnectAttempts})...`);
+      setTimeout(connectToWhatsApp, delay);
     }
 
     if (connection === "open") {
@@ -138,6 +189,7 @@ async function connectToWhatsApp() {
       authenticated = true;
       lastQr = null;
       userInfo = sock.user ?? null;
+      reconnectAttempts = 0;
       console.log("[WA] Client is ready.");
     }
   });
@@ -161,10 +213,7 @@ async function connectToWhatsApp() {
         type: "text",
         isGroup,
       };
-      try {
-        const chat = sock?.store?.messages?.get(from);
-        await sock.readMessages([m.key]).catch(() => {});
-      } catch {}
+      await sock.readMessages([m.key]).catch(() => {});
       await postWebhook(payload);
     }
   });
@@ -224,6 +273,7 @@ app.post("/logout", requireToken, async (_req, res) => {
     if (sock) await sock.logout();
     ready = false;
     authenticated = false;
+    clearAuthState(AUTH_DIR);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e?.message ?? String(e) });
@@ -232,6 +282,7 @@ app.post("/logout", requireToken, async (_req, res) => {
 
 app.post("/pairing-code", requireToken, async (req, res) => {
   if (ready) return res.status(400).json({ error: "Already connected." });
+  if (!sock) return res.status(503).json({ error: "WhatsApp client not initialized yet" });
   const phoneNumber = String(req.body?.phoneNumber ?? "").trim();
   if (!phoneNumber) return res.status(400).json({ error: "`phoneNumber` is required" });
   try {
