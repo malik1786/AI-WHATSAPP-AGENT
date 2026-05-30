@@ -84,6 +84,7 @@ export default function App() {
   async function refreshGateway() {
     try {
       const status = await api.gatewayStatus();
+      console.log("[GW STATUS]", JSON.stringify(status));
       const ready = !!status.ready;
       setGatewayReady(ready);
       if (ready) {
@@ -95,14 +96,27 @@ export default function App() {
       syncedChatsRef.current = false;
       if (status.hasQr) {
         setGatewayStatusText("Scan QR to connect");
-        try { const qr = await api.gatewayQr(); setQrText(qr.qr); } catch (e: any) {
-          if (e instanceof ApiError && e.status === 404) { setQrText(null); setGatewayStatusText("Waiting..."); }
-          else setGatewayStatusText(e?.message ?? "Failed to load QR.");
+        try {
+          const qr = await api.gatewayQr();
+          console.log("[GW QR] received, length:", qr.qr?.length);
+          setQrText(qr.qr);
+        } catch (e: any) {
+          console.error("[GW QR] error:", e?.status, e?.message, e?.payload);
+          if (e instanceof ApiError && e.status === 404) { setQrText(null); setGatewayStatusText("Waiting... (QR not ready yet)"); }
+          else setGatewayStatusText(`QR error: ${e?.message ?? "unknown"}`);
         }
-      } else { setQrText(null); setGatewayStatusText("Waiting..."); }
+      } else {
+        const parts = ["Waiting for QR..."];
+        if (status.lastDisconnect) parts.push(`last: ${status.lastDisconnect.reason}`);
+        if (status.connecting) parts.push("(connecting)");
+        if (status.userInfo) parts.push(`user: ${status.userInfo.pushname}`);
+        setQrText(null);
+        setGatewayStatusText(parts.join(" "));
+      }
     } catch (e: any) {
+      console.error("[GW STATUS] error:", e?.status, e?.message, e?.payload);
       setGatewayReady(false); setQrText(null);
-      setGatewayStatusText(e?.message ?? "Gateway offline.");
+      setGatewayStatusText(`Error: ${e?.message ?? "Gateway offline."}`);
     }
   }
 

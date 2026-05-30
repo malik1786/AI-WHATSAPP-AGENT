@@ -37,7 +37,9 @@ async function safeJson(res: Response): Promise<unknown> {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const url = `${API_BASE}${path}`;
+  console.log(`[API] ${init?.method ?? "GET"} ${url}`);
+  const res = await fetch(url, {
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -51,10 +53,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       typeof payload === "string"
         ? payload
         : payload?.error || payload?.message || `Request failed (${res.status})`;
+    console.error(`[API] ${res.status} ${url}`, payload);
     throw new ApiError(msg, res.status, payload);
   }
 
-  return (await safeJson(res)) as T;
+  const data = (await safeJson(res)) as T;
+  console.log(`[API] ${res.status} ${url}`, data);
+  return data;
 }
 
 export const api = {

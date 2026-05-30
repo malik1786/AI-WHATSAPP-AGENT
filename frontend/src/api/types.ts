@@ -25,7 +25,9 @@ export type GatewayStatus = {
   ready?: boolean;
   authenticated?: boolean;
   hasQr?: boolean;
+  connecting?: boolean;
   lastDisconnect?: { at: string; reason: string } | null;
+  userInfo?: { pushname?: string | null; phone?: string | null } | null;
   error?: string;
 };
 
