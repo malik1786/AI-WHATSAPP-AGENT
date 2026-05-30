@@ -138,7 +138,13 @@ export default function App() {
     const wasNearBottom = !!el && el.scrollHeight - el.scrollTop - el.clientHeight < 120;
     try {
       const res = await api.listMessages(chatId);
-      setMessages(res.messages);
+      if (res.messages.length > 0) {
+        setMessages(res.messages);
+      } else if (quiet) {
+        // Don't clear messages on quiet poll if server returns empty (ephemeral DB issue)
+      } else {
+        setMessages(res.messages);
+      }
       const behavior = scroll ?? (quiet ? "if-near-bottom" : "always");
       queueMicrotask(() => {
         const l = listRef.current;
@@ -147,7 +153,7 @@ export default function App() {
         l.scrollTop = l.scrollHeight;
       });
     } catch (e: any) {
-      setToast({ id: crypto.randomUUID(), kind: "error", title: "Failed to load messages", description: e?.message ?? "" });
+      if (!quiet) setToast({ id: crypto.randomUUID(), kind: "error", title: "Failed to load messages", description: e?.message ?? "" });
     } finally { if (!quiet) setLoadingMessages(false); }
   }
 
