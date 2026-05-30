@@ -143,6 +143,8 @@ async function connectToWhatsApp() {
   sock.ev.on("connection.update", (update) => {
     const { connection, lastDisconnect: ld, qr } = update;
 
+    console.log("[WA] connection.update:", JSON.stringify({ connection, hasQr: !!qr, ldKeys: ld ? Object.keys(ld) : null, ldOutput: ld?.output ? { statusCode: ld.output.statusCode, message: ld.output.message } : "no output" }));
+
     if (qr) {
       lastQr = qr;
       ready = false;
@@ -150,6 +152,32 @@ async function connectToWhatsApp() {
       console.log("\n[WA] QR received — scan with WhatsApp:");
       qrcodeTerminal.generate(qr, { small: true });
     }
+
+    if (connection === "close") {
+      const statusCode = ld?.output?.statusCode;
+      const error = ld?.output?.error;
+      ready = false;
+      authenticated = false;
+      lastDisconnect = { at: new Date().toISOString(), reason: String(statusCode ?? "unknown") };
+
+      console.log("[WA] Connection closed. statusCode:", statusCode, "error:", error?.message ?? error ?? "none", "full:", JSON.stringify(ld?.output ?? "no output"));
+
+      const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+      const isConnectionReplaced = statusCode === DisconnectReason.connectionReplaced;
+      const isBadSession = statusCode === DisconnectReason.badSession;
+      const isRestartRequired = statusCode === DisconnectReason.restartRequired;
+      const isMultideviceMismatch = statusCode === 411;
+
+      if (isLoggedOut || isBadSession || isMultideviceMismatch || statusCode === undefined) {
+        console.log("[WA] Clearing auth state for clean reconnect (code:", statusCode, ")");
+        clearAuthState(authDir);
+      }
+
+      if (isLoggedOut || isConnectionReplaced) {
+        console.log("[WA] Stopped — not reconnecting.");
+        connecting = false;
+        return;
+      }
 
     if (connection === "close") {
       const statusCode = ld?.output?.statusCode;
@@ -376,10 +404,18 @@ if (fs.existsSync(FRONTEND_DIR)) {
   });
 }
 
-app.listen(GATEWAY_PORT, () => {
+app.listen(GATEWAY_PORT, async () => {
   console.log(`[GATEWAY] listening on http://127.0.0.1:${GATEWAY_PORT}`);
   console.log(`[GATEWAY] webhook -> ${BACKEND_WEBHOOK_URL}`);
   if (BACKEND_API_URL) console.log(`[GATEWAY] api proxy -> ${BACKEND_API_URL}`);
   if (fs.existsSync(FRONTEND_DIR)) console.log(`[GATEWAY] serving frontend from ${FRONTEND_DIR}`);
+
+  try {
+    const r = await fetch("https://web.whatsapp.com", { method: "HEAD", signal: AbortSignal.timeout(10000) });
+    console.log("[GATEWAY] WhatsApp reachable, status:", r.status);
+  } catch (e) {
+    console.error("[GATEWAY] WhatsApp UNREACHABLE:", e?.message ?? e);
+  }
+
   connectToWhatsApp();
 });
