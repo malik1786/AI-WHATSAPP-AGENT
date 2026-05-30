@@ -20,5 +20,3 @@ backend/data/
 
 ## Logs
 *.log
-
-.vercel

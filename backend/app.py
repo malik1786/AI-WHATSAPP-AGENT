@@ -29,7 +29,6 @@ from db import (
     apply_coupon_code,
 )
 from gateway_client import GatewayClient
-from whatsapp_cloud import WhatsAppCloudClient
 from ai_engine import GroqChat, plan_action, polish_whatsapp_message, answer_factual_question, is_valid_reply, init_validator, get_validator, init_confidence_scorer, get_confidence_scorer
 from policy import QuietHours, AwayMode, normalize_yes_no, extract_phone_like, to_wa_id_from_digits, parse_away_command, classify_message, answer_time_question, parse_coupon_code
 
@@ -49,12 +48,6 @@ upsert_user(_init_conn, wa_id=DEMO_CHAT_ID, display_name=DEMO_CHAT_NAME, timezon
 _init_conn.close()
 
 gateway = GatewayClient(base_url=settings.gateway_base_url, token=settings.gateway_token)
-wa_cloud = WhatsAppCloudClient(
-    access_token=settings.cloud_api_access_token,
-    phone_number_id=settings.cloud_api_phone_number_id,
-    verify_token=settings.cloud_api_verify_token,
-    app_secret=settings.cloud_api_app_secret,
-)
 groq = GroqChat(api_key=settings.groq_api_key, model=settings.groq_model) if settings.groq_api_key else None
 
 # Initialize reply validator and confidence scorer
@@ -68,9 +61,6 @@ _cached_owner_name: str | None = None
 def _get_owner_name() -> str:
     global _cached_owner_name
     if _cached_owner_name:
-        return _cached_owner_name
-    if wa_cloud.is_configured():
-        _cached_owner_name = "WhatsApp Agent"
         return _cached_owner_name
     try:
         info = gateway.status()
@@ -194,13 +184,9 @@ def _send_with_policies(
         return False, "Rate limit hit: too many messages to this recipient in the last hour.", None
 
     try:
-        if wa_cloud.is_configured():
-            wa_cloud.send(to=recipient_wa_id, text=text)
-        else:
-            gateway.send(to=recipient_wa_id, text=text, simulate_typing=True)
+        gateway.send(to=recipient_wa_id, text=text, simulate_typing=True)
     except Exception as e:
-        err_msg = f"Gateway error: {e}" if not wa_cloud.is_configured() else f"Cloud API error: {e}"
-        return False, err_msg, None
+        return False, f"Gateway error: {e}", None
     convo_id = add_conversation(conn, recipient_wa_id, "out", text, message_id=None)
     return True, None, convo_id
 
@@ -245,45 +231,89 @@ def _require_backend_api_token() -> bool:
 # WhatsApp Agent API
 # ---------------------------
 
-def _handle_inbound_message(conn, wa_from: str, body: str, message_id: str | None, is_group: bool) -> dict:
+@app.post("/webhook")
+def webhook():
+    if settings.gateway_token and not _require_token(settings.gateway_token):
+        return jsonify({"error": "unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    wa_from = str(payload.get("from") or "").strip()
+    body = str(payload.get("body") or "").strip()
+    message_id = payload.get("id")
+
+    if not wa_from or not body:
+        return jsonify({"ok": True, "ignored": True})
+
+    conn = get_db()
+
     cleanup_expired_pending(conn)
     upsert_user(conn, wa_id=wa_from, display_name=None, timezone_name=settings.default_timezone)
     add_conversation(conn, wa_from, "in", body, message_id=message_id)
 
+    # --- Away mode toggle command ---
     away_cmd = parse_away_command(body)
     if away_cmd is not None:
         new_state = away_cmd == "on"
         set_away_mode(conn, new_state)
-        reply = "Away mode ON. I'll auto-reply and store messages until you turn it off." if new_state else "Away mode OFF. Resuming normal operation."
-        _send_reply(wa_from, reply)
+        if new_state:
+            reply = "Away mode ON. I'll auto-reply and store messages until you turn it off."
+        else:
+            reply = "Away mode OFF. Resuming normal operation."
+        try:
+            gateway.send(to=wa_from, text=reply, simulate_typing=True)
+        except Exception:
+            pass
         add_conversation(conn, wa_from, "out", reply, message_id=None)
-        return {"ok": True}
+        return jsonify({"ok": True})
 
+    # --- Away mode active: auto-reply and store ---
     if is_away_mode(conn):
         owner_name = _get_owner_name()
-        away_policy = AwayMode(enabled=True, owner_name=owner_name, template=settings.away_message_template)
+        away_policy = AwayMode(
+            enabled=True,
+            owner_name=owner_name,
+            template=settings.away_message_template,
+        )
         away_reply = away_policy.render_reply()
-        _send_reply(wa_from, away_reply)
+        try:
+            gateway.send(to=wa_from, text=away_reply, simulate_typing=True)
+        except Exception:
+            pass
         add_conversation(conn, wa_from, "out", away_reply, message_id=None)
         store_away_message(conn, wa_from, body, message_id)
-        return {"ok": True, "away_mode": True}
+        return jsonify({"ok": True, "away_mode": True})
 
+    # --- Message classification ---
+    is_group = payload.get("isGroup", False)
     msg_type = classify_message(body, is_group=is_group)
 
+    # --- Coupon code handling ---
     if msg_type == "coupon":
         coupon_code = parse_coupon_code(body)
-        reply = "Coupon applied! You now have unlimited access." if (coupon_code and apply_coupon_code(conn, wa_from, coupon_code)) else "Invalid coupon code. Please try again."
-        _send_reply(wa_from, reply)
+        if coupon_code and apply_coupon_code(conn, wa_from, coupon_code):
+            reply = "Coupon applied! You now have unlimited access."
+        else:
+            reply = "Invalid coupon code. Please try again."
+        try:
+            gateway.send(to=wa_from, text=reply, simulate_typing=True)
+        except Exception:
+            pass
         add_conversation(conn, wa_from, "out", reply, message_id=None)
-        return {"ok": True, "coupon": True}
+        return jsonify({"ok": True, "coupon": True})
 
+    # --- Check reply limit (only for auto-reply types) ---
     if msg_type in ("casual", "factual", "time") and not is_group:
         if not can_user_reply(conn, wa_from):
             reply = "You've used all 15 free replies. Enter coupon code to get unlimited access."
-            _send_reply(wa_from, reply)
+            try:
+                gateway.send(to=wa_from, text=reply, simulate_typing=True)
+            except Exception:
+                pass
             add_conversation(conn, wa_from, "out", reply, message_id=None)
-            return {"ok": True, "limit_reached": True}
+            return jsonify({"ok": True, "limit_reached": True})
 
+    # --- Auto-reply to casual/factual/time ---
+    if msg_type in ("casual", "factual", "time") and not is_group:
         if msg_type == "time":
             reply = answer_time_question(body, settings.default_timezone)
         elif msg_type == "factual" and groq:
@@ -293,131 +323,136 @@ def _handle_inbound_message(conn, wa_from: str, body: str, message_id: str | Non
         else:
             reply = "Hi! How can I help you?"
 
+        # Validate reply before sending
         if not is_valid_reply(reply):
             print(f"[APP] Invalid reply detected: {reply!r}, using fallback")
             reply = "Got it!"
 
+        # Check confidence score
         scorer = get_confidence_scorer()
         confidence = scorer.score(body, reply, msg_type)
         print(f"[APP] Confidence: {confidence['score']}% ({confidence['level']}) - {confidence['reason']}")
 
+        # If confidence is low, ask for confirmation
         if not confidence["should_auto_send"]:
-            confirm = f"I'm not sure how to reply to this.\n\nMy draft: {reply}\n\nReply YES to send, or NO to cancel."
-            _send_reply(wa_from, confirm)
+            confirm = (
+                f"I'm not sure how to reply to this.\n\n"
+                f"My draft: {reply}\n\n"
+                f"Reply YES to send, or NO to cancel."
+            )
+            try:
+                gateway.send(to=wa_from, text=confirm, simulate_typing=True)
+            except Exception:
+                pass
             add_conversation(conn, wa_from, "out", confirm, message_id=None)
-            create_pending(conn, controller_wa_id=wa_from, recipient_wa_id=wa_from, original_request=body, final_message=reply, ttl_seconds=settings.pending_ttl_seconds)
-            return {"ok": True, "auto_replied": False, "confidence": confidence["score"]}
+            # Store as pending for confirmation
+            create_pending(
+                conn,
+                controller_wa_id=wa_from,
+                recipient_wa_id=wa_from,
+                original_request=body,
+                final_message=reply,
+                ttl_seconds=settings.pending_ttl_seconds,
+            )
+            return jsonify({"ok": True, "auto_replied": False, "confidence": confidence["score"]})
 
+        # High confidence - auto-send
         increment_reply_count(conn, wa_from)
-        _send_reply(wa_from, reply)
+
+        try:
+            gateway.send(to=wa_from, text=reply, simulate_typing=True)
+        except Exception:
+            pass
         add_conversation(conn, wa_from, "out", reply, message_id=None)
-        return {"ok": True, "auto_replied": True, "type": msg_type, "confidence": confidence["score"]}
+        return jsonify({"ok": True, "auto_replied": True, "type": msg_type, "confidence": confidence["score"]})
 
     yn = normalize_yes_no(body)
     if yn is not None:
         pending = get_latest_pending(conn, wa_from)
         if not pending:
             reply = "No pending message. Send a new instruction."
-            _send_reply(wa_from, reply)
+            gateway.send(to=wa_from, text=reply, simulate_typing=True)
             add_conversation(conn, wa_from, "out", reply, message_id=None)
-            return {"ok": True}
+            return jsonify({"ok": True})
 
         pending_id = int(pending["id"])
         if yn == "no":
             set_pending_status(conn, pending_id, "canceled")
             reply = "Okay — canceled. I won't send anything."
-            _send_reply(wa_from, reply)
+            gateway.send(to=wa_from, text=reply, simulate_typing=True)
             add_conversation(conn, wa_from, "out", reply, message_id=None)
-            return {"ok": True}
+            return jsonify({"ok": True})
 
         recipient = str(pending["recipient_wa_id"])
         final_message = str(pending["final_message"])
         ok, err, _convo_id = _send_with_policies(conn, wa_from, recipient, final_message)
-        reply = "Sent." if ok else f"Sorry — I couldn't send that. {err}"
-        _send_reply(wa_from, reply)
+        if ok:
+            set_pending_status(conn, pending_id, "sent")
+            reply = "Sent."
+        else:
+            reply = f"Sorry — I couldn't send that. {err}"
+        try:
+            gateway.send(to=wa_from, text=reply, simulate_typing=True)
+        except Exception:
+            pass
         add_conversation(conn, wa_from, "out", reply, message_id=None)
-        return {"ok": True}
+        return jsonify({"ok": True})
 
     if not groq:
         reply = "AI is not configured. Set GROQ_API_KEY in your environment."
-        _send_reply(wa_from, reply)
+        gateway.send(to=wa_from, text=reply, simulate_typing=True)
         add_conversation(conn, wa_from, "out", reply, message_id=None)
-        return {"ok": True}
+        return jsonify({"ok": True})
 
     action = plan_action(groq, body)
     recipient_hint = action.get("recipient")
+    # Use original text for drafting to avoid overly-short "intent" outputs.
     message_intent = str(action.get("message_intent") or body)
     send_immediately = bool(action.get("send_immediately"))
 
     recipient_wa_id = _resolve_recipient(conn, recipient_hint, fallback_to=wa_from, original_text=body)
     if not recipient_wa_id:
         reply = "Which WhatsApp number should I send to? Reply with a phone number including country code (e.g. +9198xxxxxxx)."
-        _send_reply(wa_from, reply)
+        gateway.send(to=wa_from, text=reply, simulate_typing=True)
         add_conversation(conn, wa_from, "out", reply, message_id=None)
-        return {"ok": True}
+        return jsonify({"ok": True})
 
     ctx_rows = get_last_messages(conn, wa_from, settings.memory_limit)
     ctx_lines = [f"{r['direction']}: {r['text']}" for r in ctx_rows]
+    # Fetch user instructions for personalization
     user_instructions = get_user_instructions(conn, wa_from)
-    final_message = polish_whatsapp_message(groq, instruction=body, context_lines=ctx_lines, custom_behavior=user_instructions)
+    final_message = polish_whatsapp_message(
+        groq,
+        instruction=body,
+        context_lines=ctx_lines,
+        custom_behavior=user_instructions,
+    )
 
     if send_immediately:
         ok, err, _convo_id = _send_with_policies(conn, wa_from, recipient_wa_id, final_message)
         reply = "Sent." if ok else f"Sorry — I couldn't send that. {err}"
-        _send_reply(wa_from, reply)
+        try:
+            gateway.send(to=wa_from, text=reply, simulate_typing=True)
+        except Exception:
+            pass
         add_conversation(conn, wa_from, "out", reply, message_id=None)
-        return {"ok": True}
-
-    create_pending(conn, controller_wa_id=wa_from, recipient_wa_id=recipient_wa_id, original_request=body, final_message=final_message, ttl_seconds=settings.pending_ttl_seconds)
-    confirm = f"Here's the message I drafted:\n\n{final_message}\n\nReply YES to send, or NO to cancel. (Expires in 10 minutes.)"
-    _send_reply(wa_from, confirm)
-    add_conversation(conn, wa_from, "out", confirm, message_id=None)
-    return {"ok": True}
-
-
-def _send_reply(to: str, text: str) -> None:
-    try:
-        if wa_cloud.is_configured():
-            wa_cloud.send(to=to, text=text)
-        else:
-            gateway.send(to=to, text=text, simulate_typing=True)
-    except Exception:
-        pass
-
-
-@app.route("/webhook", methods=["GET", "POST"])
-def webhook():
-    if request.method == "GET":
-        mode = request.args.get("hub.mode")
-        token = request.args.get("hub.verify_token")
-        challenge = request.args.get("hub.challenge")
-        status, data = wa_cloud.verify_webhook(mode, token, challenge)
-        if status == 200:
-            return data, 200
-        return jsonify({"error": "Verification failed"}), 403
-
-    if settings.gateway_token and not _require_token(settings.gateway_token):
-        return jsonify({"error": "unauthorized"}), 401
-
-    payload = request.get_json(silent=True) or {}
-
-    conn = get_db()
-
-    # Check if this is a Cloud API webhook (from Meta)
-    cloud_messages = wa_cloud.parse_inbound(payload)
-    if cloud_messages:
-        for msg in cloud_messages:
-            _handle_inbound_message(conn, msg["from"], msg["body"], msg["id"], is_group=False)
         return jsonify({"ok": True})
 
-    wa_from = str(payload.get("from") or "").strip()
-    body = str(payload.get("body") or "").strip()
-    message_id = payload.get("id")
-
-    if not wa_from or not body:
-        return jsonify({"ok": True, "ignored": True})
-
-    _handle_inbound_message(conn, wa_from, body, message_id, is_group=payload.get("isGroup", False))
+    create_pending(
+        conn,
+        controller_wa_id=wa_from,
+        recipient_wa_id=recipient_wa_id,
+        original_request=body,
+        final_message=final_message,
+        ttl_seconds=settings.pending_ttl_seconds,
+    )
+    confirm = (
+        "Here's the message I drafted:\n\n"
+        f"{final_message}\n\n"
+        "Reply YES to send, or NO to cancel. (Expires in 10 minutes.)"
+    )
+    gateway.send(to=wa_from, text=confirm, simulate_typing=True)
+    add_conversation(conn, wa_from, "out", confirm, message_id=None)
     return jsonify({"ok": True})
 
 
@@ -552,13 +587,10 @@ def api_away_messages():
 
 @app.get("/status")
 def status():
-    if wa_cloud.is_configured():
-        gw = wa_cloud.status()
-    else:
-        try:
-            gw = gateway.status()
-        except Exception as e:
-            gw = {"ok": False, "error": str(e)}
+    try:
+        gw = gateway.status()
+    except Exception as e:
+        gw = {"ok": False, "error": str(e)}
 
     conn = get_db()
     cleanup_expired_pending(conn)
@@ -601,8 +633,6 @@ def send_direct():
 def logout():
     if settings.backend_api_token and not _require_token(settings.backend_api_token):
         return jsonify({"error": "unauthorized"}), 401
-    if wa_cloud.is_configured():
-        return jsonify(wa_cloud.logout())
     try:
         return jsonify(gateway.logout())
     except Exception as e:
@@ -622,8 +652,6 @@ def api_health():
 def api_gateway_status():
     if settings.backend_api_token and not _require_backend_api_token():
         return jsonify({"error": "unauthorized"}), 401
-    if wa_cloud.is_configured():
-        return jsonify(wa_cloud.status())
     try:
         return jsonify(gateway.status())
     except Exception as e:
@@ -635,8 +663,6 @@ def api_gateway_status():
 def api_gateway_qr():
     if settings.backend_api_token and not _require_backend_api_token():
         return jsonify({"error": "unauthorized"}), 401
-    if wa_cloud.is_configured():
-        return jsonify(wa_cloud.qr())
     try:
         return jsonify(gateway.qr())
     except Exception as e:
@@ -650,9 +676,6 @@ def api_gateway_sync_chats():
         return jsonify({"error": "unauthorized"}), 401
 
     conn = get_db()
-    if wa_cloud.is_configured():
-        return jsonify({"ok": True, "synced": 0, "message": "Cloud API manages contacts. Conversations tracked locally."})
-
     try:
         res = gateway.chats()
         items = res.get("chats") if isinstance(res, dict) else None
@@ -682,8 +705,6 @@ def api_gateway_pairing_code():
     phone_number = str(payload.get("phoneNumber") or "").strip()
     if not phone_number:
         return jsonify({"error": "phoneNumber is required"}), 400
-    if wa_cloud.is_configured():
-        return jsonify(wa_cloud.pairing_code(phone_number))
     try:
         return jsonify(gateway.pairing_code(phone_number))
     except Exception as e:
@@ -695,8 +716,6 @@ def api_gateway_pairing_code():
 def api_gateway_cancel_pairing():
     if settings.backend_api_token and not _require_backend_api_token():
         return jsonify({"error": "unauthorized"}), 401
-    if wa_cloud.is_configured():
-        return jsonify(wa_cloud.cancel_pairing())
     try:
         return jsonify(gateway.cancel_pairing())
     except Exception as e:

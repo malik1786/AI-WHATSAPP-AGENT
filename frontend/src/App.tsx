@@ -84,12 +84,6 @@ export default function App() {
   async function refreshGateway() {
     try {
       const status = await api.gatewayStatus();
-      if (status.configured) {
-        setGatewayReady(true);
-        setQrText(null);
-        setGatewayStatusText("Cloud API Connected");
-        return;
-      }
       const ready = !!status.ready;
       setGatewayReady(ready);
       if (ready) {
@@ -99,13 +93,13 @@ export default function App() {
         return;
       }
       syncedChatsRef.current = false;
-      if (status.hasQr && status.code !== "CLOUD_API_NOT_CONFIGURED") {
+      if (status.hasQr) {
         setGatewayStatusText("Scan QR to connect");
-        try { const qr = await api.gatewayQr(); setQrText("qr" in qr ? qr.qr : null); } catch (e: any) {
+        try { const qr = await api.gatewayQr(); setQrText(qr.qr); } catch (e: any) {
           if (e instanceof ApiError && e.status === 404) { setQrText(null); setGatewayStatusText("Waiting..."); }
           else setGatewayStatusText(e?.message ?? "Failed to load QR.");
         }
-      } else { setQrText(null); setGatewayStatusText(status.error ?? "Waiting..."); }
+      } else { setQrText(null); setGatewayStatusText("Waiting..."); }
     } catch (e: any) {
       setGatewayReady(false); setQrText(null);
       setGatewayStatusText(e?.message ?? "Gateway offline.");
@@ -362,8 +356,8 @@ export default function App() {
                     <Smartphone size={18} />
                   </div>
                   <div>
-                    <div className="text-sm font-semibold">WhatsApp Connection</div>
-                    <div className="text-[11px] text-wa-subtext">{gatewayStatusText === "Cloud API Connected" ? "WhatsApp Cloud API is configured" : (qrText ? "Scan QR or use pairing code" : "Configure Cloud API in Settings")}</div>
+                    <div className="text-sm font-semibold">Link Your Device</div>
+                    <div className="text-[11px] text-wa-subtext">Scan QR or use pairing code</div>
                   </div>
                 </div>
                 <QrCard qr={qrText} statusText={gatewayStatusText} />

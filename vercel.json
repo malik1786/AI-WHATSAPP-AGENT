@@ -17,10 +17,6 @@
     }
   ],
   "env": {
-    "DB_PATH": "/tmp/agent.db",
-    "CLOUD_API_ACCESS_TOKEN": "",
-    "CLOUD_API_PHONE_NUMBER_ID": "",
-    "CLOUD_API_VERIFY_TOKEN": "whatsapp_agent_verify",
-    "CLOUD_API_APP_SECRET": ""
+    "DB_PATH": "/tmp/agent.db"
   }
 }
