@@ -42,11 +42,15 @@ DEMO_CHAT_ID = (os.getenv("DEMO_CHAT_ID") or "demo").strip() or "demo"
 DEMO_CHAT_NAME = (os.getenv("DEMO_CHAT_NAME") or "Demo Chat").strip() or "Demo Chat"
 
 # Initialize DB schema once at startup.
-if settings.database_url:
-    _init_conn = connect()
-else:
-    _init_conn = connect(settings.db_path)
-init_schema(_init_conn)
+try:
+    if settings.database_url:
+        _init_conn = connect()
+    else:
+        _init_conn = connect(settings.db_path)
+    init_schema(_init_conn)
+    _init_conn.close()
+except Exception as e:
+    print(f"[DB] Schema init failed: {e}", flush=True)
 upsert_user(_init_conn, wa_id=DEMO_CHAT_ID, display_name=DEMO_CHAT_NAME, timezone_name=settings.default_timezone)
 _init_conn.close()
 
