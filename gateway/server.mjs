@@ -3,12 +3,19 @@ import qrcodeTerminal from "qrcode-terminal";
 import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } from "@whiskeysockets/baileys";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const GATEWAY_PORT = parseInt(process.env.GATEWAY_PORT ?? "3001", 10);
 const BACKEND_WEBHOOK_URL = process.env.BACKEND_WEBHOOK_URL ?? "http://127.0.0.1:5000/webhook";
 const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN ?? "";
 const AUTH_PATH = process.env.WWEBJS_AUTH_PATH ?? ".wwebjs_auth";
 const AUTH_DIR = path.resolve(AUTH_PATH);
+const BACKEND_API_URL = (process.env.BACKEND_API_URL ?? "").replace(/\/$/, "");
+
+const FRONTEND_DIR = path.resolve(__dirname, "..", "frontend", "dist");
 
 const MIN_DELAY_SAME_RECIPIENT_MS = parseInt(process.env.MIN_DELAY_SAME_RECIPIENT_MS ?? "3000", 10);
 const RANDOM_SEND_DELAY_MIN_MS = parseInt(process.env.RANDOM_SEND_DELAY_MIN_MS ?? "2000", 10);
@@ -16,6 +23,37 @@ const RANDOM_SEND_DELAY_MAX_MS = parseInt(process.env.RANDOM_SEND_DELAY_MAX_MS ?
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
+
+// --- API proxy: forward /api/* to the Vercel backend ---
+if (BACKEND_API_URL) {
+  app.all("/api/*", async (req, res) => {
+    try {
+      const targetUrl = `${BACKEND_API_URL}${req.originalUrl}`;
+      const headers = { ...req.headers, host: new URL(BACKEND_API_URL).host };
+      delete headers["transfer-encoding"];
+
+      const fetchOpts = { method: req.method, headers };
+      if (req.method !== "GET" && req.method !== "HEAD") {
+        fetchOpts.body = JSON.stringify(req.body);
+      }
+
+      const proxyRes = await fetch(targetUrl, fetchOpts);
+      res.status(proxyRes.status);
+      const contentType = proxyRes.headers.get("content-type") || "application/json";
+      res.set("Content-Type", contentType);
+      const body = await proxyRes.arrayBuffer();
+      res.send(Buffer.from(body));
+    } catch (e) {
+      console.error("[API PROXY] error:", e?.message ?? e);
+      res.status(502).json({ error: "backend unavailable" });
+    }
+  });
+}
+
+// --- Serve frontend static files ---
+if (fs.existsSync(FRONTEND_DIR)) {
+  app.use(express.static(FRONTEND_DIR));
+}
 
 function nowMs() { return Date.now(); }
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
@@ -231,8 +269,24 @@ app.get("/chats", requireToken, async (_req, res) => {
   }
 });
 
+// --- SPA fallback: serve index.html for non-API, non-file routes ---
+if (fs.existsSync(FRONTEND_DIR)) {
+  app.get("*", (req, res) => {
+    if (req.path.startsWith("/api/") || req.path.startsWith("/status") || req.path.startsWith("/qr") || req.path.startsWith("/send") || req.path.startsWith("/logout") || req.path.startsWith("/pairing-code") || req.path.startsWith("/cancel-pairing") || req.path.startsWith("/chats")) {
+      return res.status(404).json({ error: "not found" });
+    }
+    res.sendFile(path.join(FRONTEND_DIR, "index.html"));
+  });
+} else {
+  app.get("/", (_req, res) => {
+    res.json({ ok: true, message: "Gateway running. Frontend not built." });
+  });
+}
+
 app.listen(GATEWAY_PORT, () => {
   console.log(`[GATEWAY] listening on http://127.0.0.1:${GATEWAY_PORT}`);
   console.log(`[GATEWAY] webhook -> ${BACKEND_WEBHOOK_URL}`);
+  if (BACKEND_API_URL) console.log(`[GATEWAY] api proxy -> ${BACKEND_API_URL}`);
+  if (fs.existsSync(FRONTEND_DIR)) console.log(`[GATEWAY] serving frontend from ${FRONTEND_DIR}`);
   connectToWhatsApp();
 });
