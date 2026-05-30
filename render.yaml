@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: whatsapp-agent-gateway
+    runtime: node
+    plan: free
+    buildCommand: cd gateway && npm install
+    startCommand: cd gateway && node server.mjs
+    envVars:
+      - key: BACKEND_WEBHOOK_URL
+        sync: false
+      - key: GATEWAY_TOKEN
+        sync: false
+      - key: GATEWAY_PORT
+        value: 3001
+      - key: WWEBJS_AUTH_PATH
+        value: /tmp/.wwebjs_auth

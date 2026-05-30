@@ -8,6 +8,7 @@ const GATEWAY_PORT = parseInt(process.env.GATEWAY_PORT ?? "3001", 10);
 const BACKEND_WEBHOOK_URL = process.env.BACKEND_WEBHOOK_URL ?? "http://127.0.0.1:5000/webhook";
 const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN ?? "";
 const AUTH_PATH = process.env.WWEBJS_AUTH_PATH ?? ".wwebjs_auth";
+const AUTH_DIR = path.resolve(AUTH_PATH);
 
 const MIN_DELAY_SAME_RECIPIENT_MS = parseInt(process.env.MIN_DELAY_SAME_RECIPIENT_MS ?? "3000", 10);
 const RANDOM_SEND_DELAY_MIN_MS = parseInt(process.env.RANDOM_SEND_DELAY_MIN_MS ?? "2000", 10);
@@ -56,7 +57,7 @@ async function postWebhook(payload) {
 }
 
 async function connectToWhatsApp() {
-  const authDir = path.resolve(AUTH_PATH);
+  const authDir = AUTH_DIR;
   if (!fs.existsSync(authDir)) fs.mkdirSync(authDir, { recursive: true });
 
   const { state, saveCreds } = await useMultiFileAuthState(authDir);

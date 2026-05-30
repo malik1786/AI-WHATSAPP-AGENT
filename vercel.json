@@ -17,6 +17,7 @@
     }
   ],
   "env": {
-    "DB_PATH": "/tmp/agent.db"
+    "DB_PATH": "/tmp/agent.db",
+    "GATEWAY_BASE_URL": "https://whatsapp-agent-bay.vercel.app"
   }
 }
