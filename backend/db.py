@@ -6,12 +6,22 @@ import os
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
+_USE_PG = False
 if DATABASE_URL:
+    try:
+        import psycopg
+        import psycopg.rows
+        _USE_PG = True
+    except ImportError as e:
+        print(f"[DB] psycopg not available, falling back to SQLite: {e}", flush=True)
+        DATABASE_URL = ""
+
+if _USE_PG:
     import psycopg
     import psycopg.rows
 
     def connect(db_path: Path = None):
-        conn = psycopg.connect(DATABASE_URL)
+        conn = psycopg.connect(DATABASE_URL, connect_timeout=10)
         conn.autocommit = False
         return conn
 

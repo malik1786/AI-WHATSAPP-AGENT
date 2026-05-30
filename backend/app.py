@@ -42,17 +42,20 @@ DEMO_CHAT_ID = (os.getenv("DEMO_CHAT_ID") or "demo").strip() or "demo"
 DEMO_CHAT_NAME = (os.getenv("DEMO_CHAT_NAME") or "Demo Chat").strip() or "Demo Chat"
 
 # Initialize DB schema once at startup.
+_init_conn = None
 try:
     if settings.database_url:
         _init_conn = connect()
     else:
         _init_conn = connect(settings.db_path)
     init_schema(_init_conn)
+    upsert_user(_init_conn, wa_id=DEMO_CHAT_ID, display_name=DEMO_CHAT_NAME, timezone_name=settings.default_timezone)
     _init_conn.close()
 except Exception as e:
-    print(f"[DB] Schema init failed: {e}", flush=True)
-upsert_user(_init_conn, wa_id=DEMO_CHAT_ID, display_name=DEMO_CHAT_NAME, timezone_name=settings.default_timezone)
-_init_conn.close()
+    print(f"[DB] Startup error: {e}", flush=True)
+    if _init_conn:
+        try: _init_conn.close()
+        except: pass
 
 gateway = GatewayClient(base_url=settings.gateway_base_url, token=settings.gateway_token)
 groq = GroqChat(api_key=settings.groq_api_key, model=settings.groq_model) if settings.groq_api_key else None
@@ -109,10 +112,14 @@ def get_instructions(wa_id):
 
 def get_db():
     if "db" not in g:
-        if settings.database_url:
-            g.db = connect()
-        else:
-            g.db = connect(settings.db_path)
+        try:
+            if settings.database_url:
+                g.db = connect()
+            else:
+                g.db = connect(settings.db_path)
+        except Exception as e:
+            print(f"[DB] Connection error: {e}", flush=True)
+            raise
     return g.db
 
 
