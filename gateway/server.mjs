@@ -6,6 +6,7 @@ import {
   DisconnectReason,
   Browsers,
   makeCacheableSignalKeyStore,
+  fetchLatestBaileysVersion,
 } from "@whiskeysockets/baileys";
 import fs from "node:fs";
 import path from "node:path";
@@ -110,6 +111,15 @@ async function connectToWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     const logger = pino({ level: "silent" });
 
+    let version;
+    try {
+      const v = await fetchLatestBaileysVersion();
+      version = v.version;
+      console.log("[WA] Latest WA Web version:", version);
+    } catch (e) {
+      console.error("[WA] Failed to fetch WA version, using default:", e?.message);
+    }
+
     sock = makeWASocket({
       auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, logger) },
       printQRInTerminal: false,
@@ -117,6 +127,7 @@ async function connectToWhatsApp() {
       generateHighQualityLinkPreview: false,
       logger,
       getMessage: async () => undefined,
+      ...(version ? { version } : {}),
     });
 
     sock.ev.on("creds.update", saveCreds);
