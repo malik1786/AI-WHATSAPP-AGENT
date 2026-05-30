@@ -21,9 +21,7 @@ const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN ?? "";
 const AUTH_PATH = process.env.WWEBJS_AUTH_PATH ?? ".wwebjs_auth";
 const AUTH_DIR = path.resolve(AUTH_PATH);
 const BACKEND_API_URL = (process.env.BACKEND_API_URL ?? "").replace(/\/$/, "");
-
 const FRONTEND_DIR = path.resolve(__dirname, "..", "frontend", "dist");
-
 const MIN_DELAY_SAME_RECIPIENT_MS = parseInt(process.env.MIN_DELAY_SAME_RECIPIENT_MS ?? "3000", 10);
 const RANDOM_SEND_DELAY_MIN_MS = parseInt(process.env.RANDOM_SEND_DELAY_MIN_MS ?? "2000", 10);
 const RANDOM_SEND_DELAY_MAX_MS = parseInt(process.env.RANDOM_SEND_DELAY_MAX_MS ?? "8000", 10);
@@ -38,9 +36,7 @@ if (BACKEND_API_URL) {
       const headers = { ...req.headers, host: new URL(BACKEND_API_URL).host };
       delete headers["transfer-encoding"];
       const fetchOpts = { method: req.method, headers };
-      if (req.method !== "GET" && req.method !== "HEAD") {
-        fetchOpts.body = JSON.stringify(req.body);
-      }
+      if (req.method !== "GET" && req.method !== "HEAD") fetchOpts.body = JSON.stringify(req.body);
       const proxyRes = await fetch(targetUrl, fetchOpts);
       res.status(proxyRes.status);
       res.set("Content-Type", proxyRes.headers.get("content-type") || "application/json");
@@ -52,9 +48,7 @@ if (BACKEND_API_URL) {
   });
 }
 
-if (fs.existsSync(FRONTEND_DIR)) {
-  app.use(express.static(FRONTEND_DIR));
-}
+if (fs.existsSync(FRONTEND_DIR)) app.use(express.static(FRONTEND_DIR));
 
 function nowMs() { return Date.now(); }
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
@@ -92,16 +86,10 @@ async function postWebhook(payload) {
   try {
     const res = await fetch(BACKEND_WEBHOOK_URL, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(GATEWAY_TOKEN ? { Authorization: `Bearer ${GATEWAY_TOKEN}` } : {}),
-      },
+      headers: { "Content-Type": "application/json", ...(GATEWAY_TOKEN ? { Authorization: `Bearer ${GATEWAY_TOKEN}` } : {}) },
       body: JSON.stringify(payload),
     });
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      console.error("[WEBHOOK] backend returned", res.status, text);
-    }
+    if (!res.ok) console.error("[WEBHOOK] backend returned", res.status, await res.text().catch(() => ""));
   } catch (e) {
     console.error("[WEBHOOK] failed:", e?.message ?? e);
   }
@@ -111,10 +99,7 @@ let reconnectAttempts = 0;
 const MAX_RECONNECT_DELAY = 30000;
 
 async function connectToWhatsApp() {
-  if (connecting) {
-    console.log("[WA] Already connecting, skipping...");
-    return;
-  }
+  if (connecting) return;
   connecting = true;
 
   try {
@@ -123,14 +108,10 @@ async function connectToWhatsApp() {
 
     console.log("[WA] Starting connection...", authDir);
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
-
     const logger = pino({ level: "silent" });
 
     sock = makeWASocket({
-      auth: {
-        creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, logger),
-      },
+      auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, logger) },
       printQRInTerminal: false,
       browser: Browsers.ubuntu("Chrome"),
       generateHighQualityLinkPreview: false,
@@ -140,75 +121,52 @@ async function connectToWhatsApp() {
 
     sock.ev.on("creds.update", saveCreds);
 
-  sock.ev.on("connection.update", (update) => {
-    const { connection, lastDisconnect: ld, qr } = update;
+    sock.ev.on("connection.update", (update) => {
+      const { connection, lastDisconnect: ld, qr } = update;
 
-    console.log("[WA] connection.update:", JSON.stringify({ connection, hasQr: !!qr, ldKeys: ld ? Object.keys(ld) : null, ldOutput: ld?.output ? { statusCode: ld.output.statusCode, message: ld.output.message } : "no output" }));
+      console.log("[WA] connection.update:", JSON.stringify({
+        connection,
+        hasQr: !!qr,
+        ldKeys: ld ? Object.keys(ld) : null,
+        ldOutput: ld?.output ? { statusCode: ld.output.statusCode, message: ld.output.message } : "no output",
+      }));
 
-    if (qr) {
-      lastQr = qr;
-      ready = false;
-      reconnectAttempts = 0;
-      console.log("\n[WA] QR received — scan with WhatsApp:");
-      qrcodeTerminal.generate(qr, { small: true });
-    }
-
-    if (connection === "close") {
-      const statusCode = ld?.output?.statusCode;
-      const error = ld?.output?.error;
-      ready = false;
-      authenticated = false;
-      lastDisconnect = { at: new Date().toISOString(), reason: String(statusCode ?? "unknown") };
-
-      console.log("[WA] Connection closed. statusCode:", statusCode, "error:", error?.message ?? error ?? "none", "full:", JSON.stringify(ld?.output ?? "no output"));
-
-      const isLoggedOut = statusCode === DisconnectReason.loggedOut;
-      const isConnectionReplaced = statusCode === DisconnectReason.connectionReplaced;
-      const isBadSession = statusCode === DisconnectReason.badSession;
-      const isRestartRequired = statusCode === DisconnectReason.restartRequired;
-      const isMultideviceMismatch = statusCode === 411;
-
-      if (isLoggedOut || isBadSession || isMultideviceMismatch || statusCode === undefined) {
-        console.log("[WA] Clearing auth state for clean reconnect (code:", statusCode, ")");
-        clearAuthState(authDir);
+      if (qr) {
+        lastQr = qr;
+        ready = false;
+        reconnectAttempts = 0;
+        console.log("\n[WA] QR received — scan with WhatsApp:");
+        qrcodeTerminal.generate(qr, { small: true });
       }
 
-      if (isLoggedOut || isConnectionReplaced) {
-        console.log("[WA] Stopped — not reconnecting.");
-        connecting = false;
-        return;
-      }
+      if (connection === "close") {
+        ready = false;
+        authenticated = false;
+        const statusCode = ld?.output?.statusCode;
+        const errorMsg = ld?.output?.error?.message ?? ld?.output?.error ?? null;
+        lastDisconnect = { at: new Date().toISOString(), reason: String(statusCode ?? "unknown") };
 
-    if (connection === "close") {
-      const statusCode = ld?.output?.statusCode;
-      const error = ld?.output?.error;
-      ready = false;
-      authenticated = false;
-      lastDisconnect = { at: new Date().toISOString(), reason: String(statusCode ?? "unknown") };
+        console.log("[WA] Connection closed. statusCode:", statusCode, "error:", errorMsg, "full:", JSON.stringify(ld?.output ?? "no output"));
 
-      console.log("[WA] Connection closed. statusCode:", statusCode, "error:", error?.message ?? error ?? "none", "full:", JSON.stringify(ld?.output ?? "no output"));
+        const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+        const isConnectionReplaced = statusCode === DisconnectReason.connectionReplaced;
+        const isBadSession = statusCode === DisconnectReason.badSession;
+        const isRestartRequired = statusCode === DisconnectReason.restartRequired;
+        const isMultideviceMismatch = statusCode === 411;
 
-      const isLoggedOut = statusCode === DisconnectReason.loggedOut;
-      const isConnectionReplaced = statusCode === DisconnectReason.connectionReplaced;
-      const isBadSession = statusCode === DisconnectReason.badSession;
-      const isRestartRequired = statusCode === DisconnectReason.restartRequired;
-      const isMultideviceMismatch = statusCode === 411;
+        if (isLoggedOut || isBadSession || isMultideviceMismatch || statusCode === undefined) {
+          console.log("[WA] Clearing auth state (code:", statusCode, ")");
+          clearAuthState(authDir);
+        }
 
-      if (isLoggedOut || isBadSession || isMultideviceMismatch || statusCode === undefined) {
-        console.log("[WA] Clearing auth state for clean reconnect (code:", statusCode, ")");
-        clearAuthState(authDir);
-      }
-
-      if (isLoggedOut || isConnectionReplaced) {
-        console.log("[WA] Stopped — not reconnecting.");
-        connecting = false;
-        return;
-      }
+        if (isLoggedOut || isConnectionReplaced) {
+          console.log("[WA] Stopped — not reconnecting.");
+          connecting = false;
+          return;
+        }
 
         reconnectAttempts++;
-        const delay = isRestartRequired
-          ? 1000
-          : Math.min(3000 * reconnectAttempts, MAX_RECONNECT_DELAY);
+        const delay = isRestartRequired ? 1000 : Math.min(3000 * reconnectAttempts, MAX_RECONNECT_DELAY);
         console.log(`[WA] Reconnecting in ${delay}ms (attempt ${reconnectAttempts})...`);
         setTimeout(() => { connecting = false; connectToWhatsApp(); }, delay);
       }
@@ -234,14 +192,13 @@ async function connectToWhatsApp() {
           ?? m.message?.buttonsResponseMessage?.selectedButtonId
           ?? m.message?.listResponseMessage?.singleSelectReply?.selectedRowId
           ?? "";
-        const isGroup = from.endsWith("@g.us");
         const payload = {
           id: m.key.id ?? null,
           from,
           body,
           timestamp: m.messageTimestamp ? new Date(Number(m.messageTimestamp) * 1000).toISOString() : null,
           type: "text",
-          isGroup,
+          isGroup: from.endsWith("@g.us"),
         };
         await sock.readMessages([m.key]).catch(() => {});
         await postWebhook(payload);
@@ -264,10 +221,7 @@ async function resetConnection() {
   authenticated = false;
   lastQr = null;
   userInfo = null;
-  if (sock) {
-    try { sock.end(undefined); } catch {}
-    sock = null;
-  }
+  if (sock) { try { sock.end(undefined); } catch {} sock = null; }
   clearAuthState(AUTH_DIR);
   reconnectAttempts = 0;
   connecting = false;
@@ -275,15 +229,7 @@ async function resetConnection() {
 }
 
 app.get("/status", (_req, res) => {
-  res.json({
-    ok: true,
-    ready,
-    authenticated,
-    hasQr: !!lastQr,
-    connecting,
-    lastDisconnect,
-    userInfo: userInfo ? { pushname: userInfo.name ?? null, phone: userInfo.id?.split(":")[0] ?? null } : null,
-  });
+  res.json({ ok: true, ready, authenticated, hasQr: !!lastQr, connecting, lastDisconnect, userInfo: userInfo ? { pushname: userInfo.name ?? null, phone: userInfo.id?.split(":")[0] ?? null } : null });
 });
 
 app.get("/qr", (_req, res) => {
@@ -292,12 +238,8 @@ app.get("/qr", (_req, res) => {
 });
 
 app.post("/reset", requireToken, async (_req, res) => {
-  try {
-    await resetConnection();
-    res.json({ ok: true, message: "Connection reset. New QR will be generated." });
-  } catch (e) {
-    res.status(500).json({ error: e?.message ?? String(e) });
-  }
+  try { await resetConnection(); res.json({ ok: true, message: "Connection reset." }); }
+  catch (e) { res.status(500).json({ error: e?.message ?? String(e) }); }
 });
 
 app.post("/send", requireToken, async (req, res) => {
@@ -306,40 +248,22 @@ app.post("/send", requireToken, async (req, res) => {
   const simulateTyping = req.body?.simulateTyping !== false;
   if (!to || !text) return res.status(400).json({ error: "`to` and `text` are required" });
   if (!ready || !sock) return res.status(503).json({ error: "whatsapp client not ready (scan QR?)" });
-
   try {
     const last = lastSentAtByRecipient.get(to) ?? 0;
-    const since = nowMs() - last;
-    const extraWait = Math.max(0, MIN_DELAY_SAME_RECIPIENT_MS - since);
+    const extraWait = Math.max(0, MIN_DELAY_SAME_RECIPIENT_MS - (nowMs() - last));
     if (extraWait > 0) await sleep(extraWait);
-
-    const randomDelay = randInt(RANDOM_SEND_DELAY_MIN_MS, RANDOM_SEND_DELAY_MAX_MS);
-    const typeDelay = typingDurationMs(text);
-    const waitMs = Math.max(randomDelay, typeDelay);
-
-    if (simulateTyping) {
-      await sock.sendPresenceUpdate("composing", to);
-      await sleep(waitMs);
-      await sock.sendPresenceUpdate("paused", to);
-    } else {
-      await sleep(randomDelay);
-    }
-
+    const waitMs = Math.max(randInt(RANDOM_SEND_DELAY_MIN_MS, RANDOM_SEND_DELAY_MAX_MS), typingDurationMs(text));
+    if (simulateTyping) { await sock.sendPresenceUpdate("composing", to); await sleep(waitMs); await sock.sendPresenceUpdate("paused", to); }
+    else await sleep(randInt(RANDOM_SEND_DELAY_MIN_MS, RANDOM_SEND_DELAY_MAX_MS));
     const sent = await sock.sendMessage(to, { text });
     lastSentAtByRecipient.set(to, nowMs());
     res.json({ ok: true, messageId: sent?.key?.id ?? null, to });
-  } catch (e) {
-    res.status(500).json({ error: e?.message ?? String(e) });
-  }
+  } catch (e) { res.status(500).json({ error: e?.message ?? String(e) }); }
 });
 
 app.post("/logout", requireToken, async (_req, res) => {
-  try {
-    if (sock) await sock.logout();
-  } catch {}
-  ready = false;
-  authenticated = false;
-  lastQr = null;
+  try { if (sock) await sock.logout(); } catch {}
+  ready = false; authenticated = false; lastQr = null;
   clearAuthState(AUTH_DIR);
   res.json({ ok: true });
 });
@@ -347,12 +271,8 @@ app.post("/logout", requireToken, async (_req, res) => {
 app.post("/pairing-code", requireToken, async (req, res) => {
   if (ready) return res.status(400).json({ error: "Already connected." });
   if (!sock) return res.status(503).json({ error: "WhatsApp client not initialized yet" });
-
   const phoneNumber = String(req.body?.phoneNumber ?? "").replace(/\D/g, "").trim();
-  if (!phoneNumber || phoneNumber.length < 10) {
-    return res.status(400).json({ error: "Valid phone number with country code required (e.g. 919876543210)" });
-  }
-
+  if (!phoneNumber || phoneNumber.length < 10) return res.status(400).json({ error: "Valid phone number with country code required" });
   try {
     console.log("[WA] Requesting pairing code for:", phoneNumber);
     const code = await sock.requestPairingCode(phoneNumber);
@@ -364,9 +284,7 @@ app.post("/pairing-code", requireToken, async (req, res) => {
   }
 });
 
-app.post("/cancel-pairing", requireToken, async (_req, res) => {
-  res.json({ ok: true, message: "Pairing cancelled" });
-});
+app.post("/cancel-pairing", requireToken, (_req, res) => { res.json({ ok: true, message: "Pairing cancelled" }); });
 
 app.get("/chats", requireToken, async (_req, res) => {
   if (!ready || !sock) return res.status(503).json({ error: "whatsapp client not ready" });
@@ -375,33 +293,21 @@ app.get("/chats", requireToken, async (_req, res) => {
     const items = [];
     for (const c of chats) {
       const id = c.id ?? null;
-      if (!id || typeof id !== "string") continue;
-      if (id === "status@broadcast") continue;
-      items.push({
-        id,
-        name: c.name ?? c.id,
-        isGroup: id.endsWith("@g.us"),
-        lastMessage: c.lastMessage?.message ?? null,
-        lastMessageAt: c.lastMessage?.timestamp ? new Date(Number(c.lastMessage.timestamp) * 1000).toISOString() : null,
-      });
+      if (!id || typeof id !== "string" || id === "status@broadcast") continue;
+      items.push({ id, name: c.name ?? c.id, isGroup: id.endsWith("@g.us"), lastMessage: c.lastMessage?.message ?? null, lastMessageAt: c.lastMessage?.timestamp ? new Date(Number(c.lastMessage.timestamp) * 1000).toISOString() : null });
     }
     res.json({ ok: true, chats: items });
-  } catch (e) {
-    res.status(500).json({ error: e?.message ?? String(e) });
-  }
+  } catch (e) { res.status(500).json({ error: e?.message ?? String(e) }); }
 });
 
+const API_ROUTES = ["/status", "/qr", "/send", "/logout", "/pairing-code", "/cancel-pairing", "/chats", "/reset"];
 if (fs.existsSync(FRONTEND_DIR)) {
   app.get("*", (req, res) => {
-    if (req.path.startsWith("/api/") || ["/status", "/qr", "/send", "/logout", "/pairing-code", "/cancel-pairing", "/chats", "/reset"].some(r => req.path === r)) {
-      return res.status(404).json({ error: "not found" });
-    }
+    if (req.path.startsWith("/api/") || API_ROUTES.includes(req.path)) return res.status(404).json({ error: "not found" });
     res.sendFile(path.join(FRONTEND_DIR, "index.html"));
   });
 } else {
-  app.get("/", (_req, res) => {
-    res.json({ ok: true, message: "Gateway running. Frontend not built." });
-  });
+  app.get("/", (_req, res) => { res.json({ ok: true, message: "Gateway running. Frontend not built." }); });
 }
 
 app.listen(GATEWAY_PORT, async () => {
