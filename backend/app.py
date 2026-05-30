@@ -42,7 +42,10 @@ DEMO_CHAT_ID = (os.getenv("DEMO_CHAT_ID") or "demo").strip() or "demo"
 DEMO_CHAT_NAME = (os.getenv("DEMO_CHAT_NAME") or "Demo Chat").strip() or "Demo Chat"
 
 # Initialize DB schema once at startup.
-_init_conn = connect(settings.db_path)
+if settings.database_url:
+    _init_conn = connect()
+else:
+    _init_conn = connect(settings.db_path)
 init_schema(_init_conn)
 upsert_user(_init_conn, wa_id=DEMO_CHAT_ID, display_name=DEMO_CHAT_NAME, timezone_name=settings.default_timezone)
 _init_conn.close()
@@ -102,7 +105,10 @@ def get_instructions(wa_id):
 
 def get_db():
     if "db" not in g:
-        g.db = connect(settings.db_path)
+        if settings.database_url:
+            g.db = connect()
+        else:
+            g.db = connect(settings.db_path)
     return g.db
 
 

@@ -6,3 +6,4 @@ tzdata>=2024.1
 duckduckgo-search>=7.0.0
 groq
 python-dotenv
+psycopg2-binary>=2.9.0
