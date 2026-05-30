@@ -7,18 +7,13 @@ import os
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 if DATABASE_URL:
-    import psycopg2
-    import psycopg2.extras
+    import psycopg
+    import psycopg.rows
 
     def connect(db_path: Path = None):
-        conn = psycopg2.connect(DATABASE_URL)
+        conn = psycopg.connect(DATABASE_URL)
         conn.autocommit = False
         return conn
-
-    def _dict_row(conn, sql, params=()):
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute(sql, params)
-        return cur
 
     def init_schema(conn):
         cur = conn.cursor()
@@ -86,14 +81,10 @@ if DATABASE_URL:
     def upsert_user(conn, wa_id, display_name, timezone_name):
         now = utcnow_iso()
         cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO users (wa_id, display_name, timezone, created_at, last_seen_at)
-            VALUES (%s, %s, %s, %s, %s)
-            ON CONFLICT(wa_id) DO UPDATE SET
-              display_name=COALESCE(EXCLUDED.display_name, users.display_name),
-              timezone=COALESCE(users.timezone, EXCLUDED.timezone),
-              last_seen_at=EXCLUDED.last_seen_at;
-        """, (wa_id, display_name, timezone_name, now, now))
+        cur.execute(
+            "INSERT INTO users (wa_id, display_name, timezone, created_at, last_seen_at) VALUES (%s, %s, %s, %s, %s) ON CONFLICT(wa_id) DO UPDATE SET display_name=COALESCE(EXCLUDED.display_name, users.display_name), timezone=COALESCE(users.timezone, EXCLUDED.timezone), last_seen_at=EXCLUDED.last_seen_at;",
+            (wa_id, display_name, timezone_name, now, now),
+        )
         conn.commit()
 
     def set_user_instructions(conn, wa_id, instructions):
@@ -102,7 +93,7 @@ if DATABASE_URL:
         conn.commit()
 
     def get_user_instructions(conn, wa_id):
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur = conn.cursor(row_factory=psycopg.rows.dict_row)
         cur.execute("SELECT instructions FROM users WHERE wa_id=%s;", (wa_id,))
         row = cur.fetchone()
         return row["instructions"] if row and row["instructions"] else None
@@ -118,11 +109,8 @@ if DATABASE_URL:
         return int(row_id)
 
     def get_last_messages(conn, wa_id, limit):
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute(
-            "SELECT direction, text, created_at FROM conversations WHERE wa_id=%s ORDER BY created_at DESC LIMIT %s;",
-            (wa_id, limit),
-        )
+        cur = conn.cursor(row_factory=psycopg.rows.dict_row)
+        cur.execute("SELECT direction, text, created_at FROM conversations WHERE wa_id=%s ORDER BY created_at DESC LIMIT %s;", (wa_id, limit))
         rows = cur.fetchall()
         rows.reverse()
         return rows
@@ -140,9 +128,7 @@ if DATABASE_URL:
         expires_at = datetime.fromtimestamp(expires, tz=timezone.utc).isoformat()
         cur = conn.cursor()
         cur.execute(
-            """INSERT INTO pending_messages
-               (controller_wa_id, recipient_wa_id, original_request, final_message, created_at, expires_at, status)
-               VALUES (%s, %s, %s, %s, %s, %s, 'pending') RETURNING id;""",
+            "INSERT INTO pending_messages (controller_wa_id, recipient_wa_id, original_request, final_message, created_at, expires_at, status) VALUES (%s, %s, %s, %s, %s, %s, 'pending') RETURNING id;",
             (controller_wa_id, recipient_wa_id, original_request, final_message, created.isoformat(), expires_at),
         )
         row_id = cur.fetchone()[0]
@@ -151,13 +137,8 @@ if DATABASE_URL:
 
     def get_latest_pending(conn, controller_wa_id):
         now = utcnow_iso()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cur.execute(
-            """SELECT * FROM pending_messages
-               WHERE controller_wa_id=%s AND status='pending' AND expires_at > %s
-               ORDER BY created_at DESC LIMIT 1;""",
-            (controller_wa_id, now),
-        )
+        cur = conn.cursor(row_factory=psycopg.rows.dict_row)
+        cur.execute("SELECT * FROM pending_messages WHERE controller_wa_id=%s AND status='pending' AND expires_at > %s ORDER BY created_at DESC LIMIT 1;", (controller_wa_id, now))
         return cur.fetchone()
 
     def set_pending_status(conn, pending_id, status):
@@ -168,7 +149,7 @@ if DATABASE_URL:
     def count_outgoing_last_hour(conn, wa_id=None):
         cutoff = datetime.now(timezone.utc).timestamp() - 3600
         cutoff_iso = datetime.fromtimestamp(cutoff, tz=timezone.utc).isoformat()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur = conn.cursor(row_factory=psycopg.rows.dict_row)
         if wa_id:
             cur.execute("SELECT COUNT(*) AS c FROM conversations WHERE direction='out' AND wa_id=%s AND created_at >= %s;", (wa_id, cutoff_iso))
         else:
@@ -176,7 +157,7 @@ if DATABASE_URL:
         return int(cur.fetchone()["c"])
 
     def get_app_state(conn, key):
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur = conn.cursor(row_factory=psycopg.rows.dict_row)
         cur.execute("SELECT value FROM app_state WHERE key=%s;", (key,))
         row = cur.fetchone()
         return row["value"] if row else None
@@ -184,11 +165,7 @@ if DATABASE_URL:
     def set_app_state(conn, key, value):
         now = utcnow_iso()
         cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO app_state (key, value, updated_at) VALUES (%s, %s, %s) "
-            "ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=EXCLUDED.updated_at;",
-            (key, value, now),
-        )
+        cur.execute("INSERT INTO app_state (key, value, updated_at) VALUES (%s, %s, %s) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value, updated_at=EXCLUDED.updated_at;", (key, value, now))
         conn.commit()
 
     def is_away_mode(conn):
@@ -199,31 +176,23 @@ if DATABASE_URL:
 
     def store_away_message(conn, wa_id, text, message_id):
         cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO away_messages (wa_id, message_id, text, received_at) VALUES (%s, %s, %s, %s) RETURNING id;",
-            (wa_id, message_id, text, utcnow_iso()),
-        )
+        cur.execute("INSERT INTO away_messages (wa_id, message_id, text, received_at) VALUES (%s, %s, %s, %s) RETURNING id;", (wa_id, message_id, text, utcnow_iso()))
         row_id = cur.fetchone()[0]
         conn.commit()
         return int(row_id)
 
     def get_away_messages(conn, limit=50):
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur = conn.cursor(row_factory=psycopg.rows.dict_row)
         cur.execute("SELECT * FROM away_messages ORDER BY received_at DESC LIMIT %s;", (limit,))
         return cur.fetchall()
 
     def get_user_reply_info(conn, wa_id):
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur = conn.cursor(row_factory=psycopg.rows.dict_row)
         cur.execute("SELECT reply_count, max_replies, is_unlimited, coupon_code FROM users WHERE wa_id=%s;", (wa_id,))
         row = cur.fetchone()
         if not row:
             return {"reply_count": 0, "max_replies": 15, "is_unlimited": False, "coupon_code": None}
-        return {
-            "reply_count": row["reply_count"],
-            "max_replies": row["max_replies"],
-            "is_unlimited": bool(row["is_unlimited"]),
-            "coupon_code": row["coupon_code"],
-        }
+        return {"reply_count": row["reply_count"], "max_replies": row["max_replies"], "is_unlimited": bool(row["is_unlimited"]), "coupon_code": row["coupon_code"]}
 
     def can_user_reply(conn, wa_id):
         info = get_user_reply_info(conn, wa_id)
