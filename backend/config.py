@@ -25,6 +25,11 @@ class Settings:
     groq_api_key: str | None
     groq_model: str
 
+    cloud_api_access_token: str
+    cloud_api_phone_number_id: str
+    cloud_api_verify_token: str
+    cloud_api_app_secret: str
+
     memory_limit: int
     pending_ttl_seconds: int
 
@@ -75,6 +80,11 @@ def load_settings() -> Settings:
     groq_api_key = os.getenv("GROQ_API_KEY")
     groq_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
+    cloud_api_access_token = os.getenv("CLOUD_API_ACCESS_TOKEN", "")
+    cloud_api_phone_number_id = os.getenv("CLOUD_API_PHONE_NUMBER_ID", "")
+    cloud_api_verify_token = os.getenv("CLOUD_API_VERIFY_TOKEN", "")
+    cloud_api_app_secret = os.getenv("CLOUD_API_APP_SECRET", "")
+
     memory_limit = int(os.getenv("MEMORY_LIMIT", "5"))
     pending_ttl_seconds = int(os.getenv("PENDING_TTL_SECONDS", "600"))
 
@@ -100,6 +110,10 @@ def load_settings() -> Settings:
         backend_api_token=backend_api_token,
         groq_api_key=groq_api_key,
         groq_model=groq_model,
+        cloud_api_access_token=cloud_api_access_token,
+        cloud_api_phone_number_id=cloud_api_phone_number_id,
+        cloud_api_verify_token=cloud_api_verify_token,
+        cloud_api_app_secret=cloud_api_app_secret,
         memory_limit=memory_limit,
         pending_ttl_seconds=pending_ttl_seconds,
         quiet_hours_start=quiet_hours_start,

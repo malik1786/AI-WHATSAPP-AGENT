@@ -25,11 +25,16 @@ export type GatewayStatus = {
   ready?: boolean;
   authenticated?: boolean;
   hasQr?: boolean;
+  configured?: boolean;
   lastDisconnect?: { at: string; reason: string } | null;
   error?: string;
+  code?: string;
 };
 
-export type GatewayQr = { qr: string };
+export type GatewayQr =
+  | { qr: string }
+  | { ok: boolean; configured?: boolean; error?: string; code?: string };
+
 export type GatewayChats = {
   ok: true;
   chats: Array<{

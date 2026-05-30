@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { QrCode, Smartphone, Copy, Check, RefreshCw, ArrowRight } from "lucide-react";
+import { QrCode, Smartphone, Copy, Check, RefreshCw, ArrowRight, Cloud, CheckCircle2, ExternalLink } from "lucide-react";
 import { qrToDataUrl } from "../lib/qr";
 import { api } from "../api/client";
 
@@ -8,10 +8,11 @@ type Props = {
   statusText?: string;
 };
 
-type Mode = "qr" | "code";
+type Mode = "qr" | "code" | "cloud";
 
 export default function QrCard({ qr, statusText }: Props) {
-  const [mode, setMode] = useState<Mode>("qr");
+  const isCloud = statusText === "Cloud API Connected";
+  const [mode, setMode] = useState<Mode>(isCloud ? "cloud" : "qr");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [pairingCode, setPairingCode] = useState<string | null>(null);
   const [pairingLoading, setPairingLoading] = useState(false);
@@ -28,6 +29,10 @@ export default function QrCard({ qr, statusText }: Props) {
     qrToDataUrl(value).then((url) => { if (alive) setDataUrl(url); }).catch(() => { if (alive) setDataUrl(null); });
     return () => { alive = false; };
   }, [value]);
+
+  useEffect(() => {
+    if (isCloud) setMode("cloud");
+  }, [isCloud]);
 
   const requestPairingCode = useCallback(async () => {
     const digits = phoneNumber.replace(/\D/g, "");
@@ -59,6 +64,28 @@ export default function QrCard({ qr, statusText }: Props) {
     if (mode === "code") cancelPairing();
     setMode(newMode);
   }, [mode, cancelPairing]);
+
+  // Cloud API configured view
+  if (isCloud || mode === "cloud") {
+    return (
+      <div className="grid gap-4">
+        <div className="rounded-2xl bg-green-500/10 border border-green-500/20 p-6 text-center">
+          <CheckCircle2 size={48} className="mx-auto mb-3 text-wa-green" />
+          <div className="text-sm font-semibold text-wa-text mb-1">WhatsApp Cloud API</div>
+          <div className="text-xs text-wa-subtext mb-4">Connected and ready to send messages</div>
+          <a
+            href="https://developers.facebook.com/apps/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="wa-btn-ghost !py-2 !px-4 text-xs inline-flex items-center gap-2"
+          >
+            <ExternalLink size={12} />
+            Manage in Meta Dashboard
+          </a>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="grid gap-4">
@@ -196,7 +223,9 @@ export default function QrCard({ qr, statusText }: Props) {
       )}
 
       <div className="min-h-[18px] text-center text-xs text-wa-subtext">
-        {statusText ?? (
+        {statusText ? (
+          <span>{statusText}</span>
+        ) : (
           <span className="inline-flex items-center gap-1">
             Waiting
             <span className="loading-dots"><span>.</span><span>.</span><span>.</span></span>
