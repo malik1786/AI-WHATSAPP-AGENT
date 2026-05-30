@@ -1,6 +1,7 @@
 import express from "express";
 import qrcodeTerminal from "qrcode-terminal";
-import makeWASocket, {
+import {
+  makeWASocket,
   useMultiFileAuthState,
   DisconnectReason,
   Browsers,
