@@ -6,6 +6,8 @@ services:
     buildCommand: cd frontend && npm install && npm run build && cd ../gateway && npm install
     startCommand: cd gateway && node server.mjs
     envVars:
+      - key: NODE_ENV
+        value: production
       - key: BACKEND_WEBHOOK_URL
         value: https://whatsapp-agent-bay.vercel.app/webhook
       - key: BACKEND_API_URL

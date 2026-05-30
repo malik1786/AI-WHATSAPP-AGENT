@@ -139,48 +139,42 @@ async function connectToWhatsApp() {
 
     sock.ev.on("creds.update", saveCreds);
 
-    sock.ev.on("connection.update", (update) => {
-      const { connection, lastDisconnect: ld, qr } = update;
+  sock.ev.on("connection.update", (update) => {
+    const { connection, lastDisconnect: ld, qr } = update;
 
-      if (qr) {
-        lastQr = qr;
-        ready = false;
-        reconnectAttempts = 0;
-        console.log("\n[WA] QR received — scan with WhatsApp:");
-        qrcodeTerminal.generate(qr, { small: true });
+    if (qr) {
+      lastQr = qr;
+      ready = false;
+      reconnectAttempts = 0;
+      console.log("\n[WA] QR received — scan with WhatsApp:");
+      qrcodeTerminal.generate(qr, { small: true });
+    }
+
+    if (connection === "close") {
+      const statusCode = ld?.output?.statusCode;
+      const error = ld?.output?.error;
+      ready = false;
+      authenticated = false;
+      lastDisconnect = { at: new Date().toISOString(), reason: String(statusCode ?? "unknown") };
+
+      console.log("[WA] Connection closed. statusCode:", statusCode, "error:", error?.message ?? error ?? "none", "full:", JSON.stringify(ld?.output ?? "no output"));
+
+      const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+      const isConnectionReplaced = statusCode === DisconnectReason.connectionReplaced;
+      const isBadSession = statusCode === DisconnectReason.badSession;
+      const isRestartRequired = statusCode === DisconnectReason.restartRequired;
+      const isMultideviceMismatch = statusCode === 411;
+
+      if (isLoggedOut || isBadSession || isMultideviceMismatch || statusCode === undefined) {
+        console.log("[WA] Clearing auth state for clean reconnect (code:", statusCode, ")");
+        clearAuthState(authDir);
       }
 
-      if (connection === "close") {
-        const statusCode = ld?.output?.statusCode;
-        ready = false;
-        authenticated = false;
-        lastDisconnect = { at: new Date().toISOString(), reason: String(statusCode ?? "unknown") };
-
-        const isLoggedOut = statusCode === DisconnectReason.loggedOut;
-        const isConnectionReplaced = statusCode === DisconnectReason.connectionReplaced;
-        const isBadSession = statusCode === DisconnectReason.badSession;
-        const isRestartRequired = statusCode === DisconnectReason.restartRequired;
-        const isMultideviceMismatch = statusCode === 411;
-        const isTimedOut = statusCode === DisconnectReason.connectionClosed;
-
-        console.log("[WA] Connection closed:", statusCode,
-          isLoggedOut ? "(logged out)" :
-          isConnectionReplaced ? "(replaced)" :
-          isBadSession ? "(bad session)" :
-          isRestartRequired ? "(restart required)" :
-          isTimedOut ? "(timed out)" :
-          "(other)");
-
-        if (isLoggedOut || isBadSession || isMultideviceMismatch || isTimedOut) {
-          console.log("[WA] Clearing auth state for clean reconnect (code:", statusCode, ")");
-          clearAuthState(authDir);
-        }
-
-        if (isLoggedOut || isConnectionReplaced) {
-          console.log("[WA] Stopped — not reconnecting.");
-          connecting = false;
-          return;
-        }
+      if (isLoggedOut || isConnectionReplaced) {
+        console.log("[WA] Stopped — not reconnecting.");
+        connecting = false;
+        return;
+      }
 
         reconnectAttempts++;
         const delay = isRestartRequired
