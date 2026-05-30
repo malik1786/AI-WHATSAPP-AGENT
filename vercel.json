@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "installCommand": "cd frontend && npm install",
+  "installCommand": "cd frontend && npm install && cd ../api && uv pip install --system -r requirements.txt",
   "buildCommand": "cd frontend && npm run build",
   "outputDirectory": "frontend/dist",
   "routes": [
@@ -15,5 +15,8 @@
       "src": "/(.*)",
       "dest": "/index.html"
     }
-  ]
+  ],
+  "env": {
+    "DB_PATH": "/tmp/agent.db"
+  }
 }
