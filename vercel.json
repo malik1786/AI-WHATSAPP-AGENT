@@ -17,7 +17,8 @@
     }
   ],
   "env": {
-    "DATABASE_URL": "postgresql://postgres:Malik_17865300@db.pzoonasapykuatqfkrli.supabase.co:5432/postgres",
+    "DB_PATH": "/tmp/agent.db",
+    "DATABASE_URL": "",
     "GATEWAY_BASE_URL": "https://whatsapp-agent-gateway.onrender.com",
     "GATEWAY_TOKEN": "mysecrettoken123",
     "DEMO_CHAT_ID": "demo",

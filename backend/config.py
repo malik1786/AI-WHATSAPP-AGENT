@@ -17,7 +17,6 @@ class Settings:
     frontend_dist: Path
 
     db_path: Path
-    database_url: str
 
     gateway_base_url: str
     gateway_token: str
@@ -68,7 +67,6 @@ def load_settings() -> Settings:
                 pass
 
     db_path = Path(os.getenv("DB_PATH", str(Path(__file__).resolve().parent / "data" / "agent.db")))
-    database_url = os.getenv("DATABASE_URL", "")
 
     gateway_base_url = (os.getenv("GATEWAY_BASE_URL") or "http://127.0.0.1:3001").rstrip("/")
     gateway_token = os.getenv("GATEWAY_TOKEN", "")
@@ -97,7 +95,6 @@ def load_settings() -> Settings:
         repo_root=repo_root,
         frontend_dist=frontend_dist,
         db_path=db_path,
-        database_url=database_url,
         gateway_base_url=gateway_base_url,
         gateway_token=gateway_token,
         backend_api_token=backend_api_token,
