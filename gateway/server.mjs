@@ -121,6 +121,18 @@ async function connectToWhatsApp() {
 
     sock.ev.on("creds.update", saveCreds);
 
+    let connectTimeout = null;
+    connectTimeout = setTimeout(() => {
+      if (!ready && connecting) {
+        console.log("[WA] Connection timed out after 30s in 'connecting' state — forcing reconnect");
+        try { sock.end(undefined); } catch {}
+        connecting = false;
+        clearAuthState(authDir);
+        reconnectAttempts++;
+        setTimeout(connectToWhatsApp, 3000);
+      }
+    }, 30000);
+
     sock.ev.on("connection.update", (update) => {
       const { connection, lastDisconnect: ld, qr } = update;
 
@@ -137,6 +149,7 @@ async function connectToWhatsApp() {
         lastQr = qr;
         ready = false;
         reconnectAttempts = 0;
+        if (connectTimeout) { clearTimeout(connectTimeout); connectTimeout = null; }
         console.log("\n[WA] QR received — scan with WhatsApp:");
         qrcodeTerminal.generate(qr, { small: true });
       }
@@ -144,6 +157,7 @@ async function connectToWhatsApp() {
       if (connection === "close") {
         ready = false;
         authenticated = false;
+        if (connectTimeout) { clearTimeout(connectTimeout); connectTimeout = null; }
 
         const err = ld?.error;
         const errorMsg = err?.message ?? String(err ?? "unknown");
@@ -184,6 +198,7 @@ async function connectToWhatsApp() {
         userInfo = sock.user ?? null;
         reconnectAttempts = 0;
         connecting = false;
+        if (connectTimeout) { clearTimeout(connectTimeout); connectTimeout = null; }
         console.log("[WA] Connected! User:", userInfo?.name ?? "unknown");
       }
     });
