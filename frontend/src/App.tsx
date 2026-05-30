@@ -313,6 +313,16 @@ export default function App() {
         )}
       </div>
 
+      {/* Templates - always visible */}
+      <div className="border-t border-wa-border px-4 py-3">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-[11px] font-semibold text-wa-subtext uppercase tracking-wider">Quick Templates</span>
+        </div>
+        <div className="max-h-[180px] overflow-auto -mx-1 px-1">
+          <ChatTemplates onSelect={(t) => { setAgentDraft(t); setSidebarOpen(false); }} />
+        </div>
+      </div>
+
       {/* Connection status */}
       <div className="border-t border-wa-border px-4 py-3">
         <div className="flex items-center justify-between">

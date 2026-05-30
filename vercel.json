@@ -19,6 +19,8 @@
   "env": {
     "DB_PATH": "/tmp/agent.db",
     "GATEWAY_BASE_URL": "https://whatsapp-agent-gateway.onrender.com",
-    "GATEWAY_TOKEN": "mysecrettoken123"
+    "GATEWAY_TOKEN": "mysecrettoken123",
+    "DEMO_CHAT_ID": "demo",
+    "DEMO_CHAT_NAME": "vhot ai agent"
   }
 }
