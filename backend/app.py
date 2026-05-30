@@ -723,6 +723,17 @@ def api_gateway_cancel_pairing():
         return jsonify(payload), status
 
 
+@app.post("/api/gateway/reset")
+def api_gateway_reset():
+    if settings.backend_api_token and not _require_backend_api_token():
+        return jsonify({"error": "unauthorized"}), 401
+    try:
+        return jsonify(gateway.reset())
+    except Exception as e:
+        payload, status = _gateway_error_response(e)
+        return jsonify(payload), status
+
+
 @app.get("/api/chats")
 def api_list_chats():
     conn = get_db()

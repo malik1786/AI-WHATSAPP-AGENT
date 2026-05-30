@@ -53,3 +53,8 @@ class GatewayClient:
         res = requests.post(f"{self.base_url}/cancel-pairing", json={}, headers=self._headers(), timeout=10)
         res.raise_for_status()
         return res.json()
+
+    def reset(self) -> dict:
+        res = requests.post(f"{self.base_url}/reset", json={}, headers=self._headers(), timeout=30)
+        res.raise_for_status()
+        return res.json()

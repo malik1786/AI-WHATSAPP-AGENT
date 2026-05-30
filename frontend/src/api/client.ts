@@ -94,4 +94,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify({}),
     }),
+  gatewayReset: () =>
+    request<{ ok: boolean; message: string }>("/api/gateway/reset", {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
 };

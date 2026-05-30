@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { QrCode, Smartphone, Copy, Check, RefreshCw, ArrowRight } from "lucide-react";
+import { QrCode, Smartphone, Copy, Check, RefreshCw, ArrowRight, RotateCcw } from "lucide-react";
 import { qrToDataUrl } from "../lib/qr";
 import { api } from "../api/client";
 
@@ -17,6 +17,7 @@ export default function QrCard({ qr, statusText }: Props) {
   const [pairingLoading, setPairingLoading] = useState(false);
   const [pairingError, setPairingError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   const [dataUrl, setDataUrl] = useState<string | null>(null);
   const value = useMemo(() => (qr ? String(qr) : null), [qr]);
@@ -59,6 +60,14 @@ export default function QrCard({ qr, statusText }: Props) {
     if (mode === "code") cancelPairing();
     setMode(newMode);
   }, [mode, cancelPairing]);
+
+  const handleReset = useCallback(async () => {
+    setResetting(true);
+    try {
+      await api.gatewayReset();
+    } catch {}
+    setTimeout(() => setResetting(false), 3000);
+  }, []);
 
   return (
     <div className="grid gap-4">
@@ -195,13 +204,22 @@ export default function QrCard({ qr, statusText }: Props) {
         </div>
       )}
 
-      <div className="min-h-[18px] text-center text-xs text-wa-subtext">
+      <div className="flex min-h-[18px] items-center justify-center gap-2 text-center text-xs text-wa-subtext">
         {statusText ?? (
           <span className="inline-flex items-center gap-1">
             Waiting
             <span className="loading-dots"><span>.</span><span>.</span><span>.</span></span>
           </span>
         )}
+        <button
+          className="ml-1 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] text-wa-subtext transition-colors hover:bg-wa-panel2 hover:text-wa-text disabled:opacity-50"
+          onClick={handleReset}
+          disabled={resetting}
+          title="Reset connection and generate new QR"
+        >
+          <RotateCcw size={12} className={resetting ? "animate-spin" : ""} />
+          {resetting ? "Resetting..." : "Reset"}
+        </button>
       </div>
     </div>
   );

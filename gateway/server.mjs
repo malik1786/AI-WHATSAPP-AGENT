@@ -30,25 +30,20 @@ const RANDOM_SEND_DELAY_MAX_MS = parseInt(process.env.RANDOM_SEND_DELAY_MAX_MS ?
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 
-// --- API proxy: forward /api/* to the Vercel backend ---
 if (BACKEND_API_URL) {
   app.all("/api/*", async (req, res) => {
     try {
       const targetUrl = `${BACKEND_API_URL}${req.originalUrl}`;
       const headers = { ...req.headers, host: new URL(BACKEND_API_URL).host };
       delete headers["transfer-encoding"];
-
       const fetchOpts = { method: req.method, headers };
       if (req.method !== "GET" && req.method !== "HEAD") {
         fetchOpts.body = JSON.stringify(req.body);
       }
-
       const proxyRes = await fetch(targetUrl, fetchOpts);
       res.status(proxyRes.status);
-      const contentType = proxyRes.headers.get("content-type") || "application/json";
-      res.set("Content-Type", contentType);
-      const body = await proxyRes.arrayBuffer();
-      res.send(Buffer.from(body));
+      res.set("Content-Type", proxyRes.headers.get("content-type") || "application/json");
+      res.send(Buffer.from(await proxyRes.arrayBuffer()));
     } catch (e) {
       console.error("[API PROXY] error:", e?.message ?? e);
       res.status(502).json({ error: "backend unavailable" });
@@ -56,7 +51,6 @@ if (BACKEND_API_URL) {
   });
 }
 
-// --- Serve frontend static files ---
 if (fs.existsSync(FRONTEND_DIR)) {
   app.use(express.static(FRONTEND_DIR));
 }
@@ -79,6 +73,7 @@ let ready = false;
 let authenticated = false;
 let lastDisconnect = null;
 let userInfo = null;
+let connecting = false;
 const lastSentAtByRecipient = new Map();
 
 function clearAuthState(dir) {
@@ -115,108 +110,145 @@ let reconnectAttempts = 0;
 const MAX_RECONNECT_DELAY = 30000;
 
 async function connectToWhatsApp() {
-  const authDir = AUTH_DIR;
-  if (!fs.existsSync(authDir)) fs.mkdirSync(authDir, { recursive: true });
+  if (connecting) {
+    console.log("[WA] Already connecting, skipping...");
+    return;
+  }
+  connecting = true;
 
-  const { state, saveCreds } = await useMultiFileAuthState(authDir);
+  try {
+    const authDir = AUTH_DIR;
+    if (!fs.existsSync(authDir)) fs.mkdirSync(authDir, { recursive: true });
 
-  const logger = pino({ level: "silent" });
+    console.log("[WA] Starting connection...", authDir);
+    const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
-  sock = makeWASocket({
-    auth: {
-      creds: state.creds,
-      keys: makeCacheableSignalKeyStore(state.keys, logger),
-    },
-    printQRInTerminal: false,
-    browser: Browsers.ubuntu("Chrome"),
-    generateHighQualityLinkPreview: false,
-    logger,
-    getMessage: async () => undefined,
-  });
+    const logger = pino({ level: "silent" });
 
-  sock.ev.on("creds.update", saveCreds);
+    sock = makeWASocket({
+      auth: {
+        creds: state.creds,
+        keys: makeCacheableSignalKeyStore(state.keys, logger),
+      },
+      printQRInTerminal: false,
+      browser: Browsers.ubuntu("Chrome"),
+      generateHighQualityLinkPreview: false,
+      logger,
+      getMessage: async () => undefined,
+    });
 
-  sock.ev.on("connection.update", (update) => {
-    const { connection, lastDisconnect: ld, qr } = update;
+    sock.ev.on("creds.update", saveCreds);
 
-    if (qr) {
-      lastQr = qr;
-      ready = false;
-      reconnectAttempts = 0;
-      console.log("\n[WA] Scan this QR code with WhatsApp:");
-      qrcodeTerminal.generate(qr, { small: true });
-    }
+    sock.ev.on("connection.update", (update) => {
+      const { connection, lastDisconnect: ld, qr } = update;
 
-    if (connection === "close") {
-      const statusCode = ld?.output?.statusCode;
-      ready = false;
-      authenticated = false;
-      lastDisconnect = { at: new Date().toISOString(), reason: String(statusCode ?? "unknown") };
-
-      const isLoggedOut = statusCode === DisconnectReason.loggedOut;
-      const isConnectionReplaced = statusCode === DisconnectReason.connectionReplaced;
-      const isBadSession = statusCode === DisconnectReason.badSession;
-      const isRestartRequired = statusCode === DisconnectReason.restartRequired;
-      const isMultideviceMismatch = statusCode === 411;
-
-      console.log("[WA] Connection closed:", statusCode,
-        isLoggedOut ? "(logged out)" :
-        isConnectionReplaced ? "(replaced)" :
-        isBadSession ? "(bad session)" :
-        isRestartRequired ? "(restart required)" :
-        "(unknown)");
-
-      if (isLoggedOut || isBadSession || isMultideviceMismatch) {
-        console.log("[WA] Clearing stale auth state (code:", statusCode, ")");
-        clearAuthState(authDir);
+      if (qr) {
+        lastQr = qr;
+        ready = false;
+        reconnectAttempts = 0;
+        console.log("\n[WA] QR received — scan with WhatsApp:");
+        qrcodeTerminal.generate(qr, { small: true });
       }
 
-      if (isLoggedOut || isConnectionReplaced) {
-        console.log("[WA] Stopped — not reconnecting.");
-        return;
+      if (connection === "close") {
+        const statusCode = ld?.output?.statusCode;
+        ready = false;
+        authenticated = false;
+        lastDisconnect = { at: new Date().toISOString(), reason: String(statusCode ?? "unknown") };
+
+        const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+        const isConnectionReplaced = statusCode === DisconnectReason.connectionReplaced;
+        const isBadSession = statusCode === DisconnectReason.badSession;
+        const isRestartRequired = statusCode === DisconnectReason.restartRequired;
+        const isMultideviceMismatch = statusCode === 411;
+        const isTimedOut = statusCode === DisconnectReason.connectionClosed;
+
+        console.log("[WA] Connection closed:", statusCode,
+          isLoggedOut ? "(logged out)" :
+          isConnectionReplaced ? "(replaced)" :
+          isBadSession ? "(bad session)" :
+          isRestartRequired ? "(restart required)" :
+          isTimedOut ? "(timed out)" :
+          "(other)");
+
+        if (isLoggedOut || isBadSession || isMultideviceMismatch || isTimedOut) {
+          console.log("[WA] Clearing auth state for clean reconnect (code:", statusCode, ")");
+          clearAuthState(authDir);
+        }
+
+        if (isLoggedOut || isConnectionReplaced) {
+          console.log("[WA] Stopped — not reconnecting.");
+          connecting = false;
+          return;
+        }
+
+        reconnectAttempts++;
+        const delay = isRestartRequired
+          ? 1000
+          : Math.min(3000 * reconnectAttempts, MAX_RECONNECT_DELAY);
+        console.log(`[WA] Reconnecting in ${delay}ms (attempt ${reconnectAttempts})...`);
+        setTimeout(() => { connecting = false; connectToWhatsApp(); }, delay);
       }
 
-      reconnectAttempts++;
-      const delay = isRestartRequired
-        ? 1000
-        : Math.min(3000 * reconnectAttempts, MAX_RECONNECT_DELAY);
-      console.log(`[WA] Reconnecting in ${delay}ms (attempt ${reconnectAttempts})...`);
-      setTimeout(connectToWhatsApp, delay);
-    }
+      if (connection === "open") {
+        ready = true;
+        authenticated = true;
+        lastQr = null;
+        userInfo = sock.user ?? null;
+        reconnectAttempts = 0;
+        connecting = false;
+        console.log("[WA] Connected! User:", userInfo?.name ?? "unknown");
+      }
+    });
 
-    if (connection === "open") {
-      ready = true;
-      authenticated = true;
-      lastQr = null;
-      userInfo = sock.user ?? null;
-      reconnectAttempts = 0;
-      console.log("[WA] Client is ready.");
-    }
-  });
+    sock.ev.on("messages.upsert", async (msg) => {
+      if (msg.type !== "notify") return;
+      for (const m of msg.messages) {
+        if (!m || m.key.fromMe) continue;
+        const from = m.key.remoteJid ?? "";
+        const body = m.message?.conversation
+          ?? m.message?.extendedTextMessage?.text
+          ?? m.message?.buttonsResponseMessage?.selectedButtonId
+          ?? m.message?.listResponseMessage?.singleSelectReply?.selectedRowId
+          ?? "";
+        const isGroup = from.endsWith("@g.us");
+        const payload = {
+          id: m.key.id ?? null,
+          from,
+          body,
+          timestamp: m.messageTimestamp ? new Date(Number(m.messageTimestamp) * 1000).toISOString() : null,
+          type: "text",
+          isGroup,
+        };
+        await sock.readMessages([m.key]).catch(() => {});
+        await postWebhook(payload);
+      }
+    });
 
-  sock.ev.on("messages.upsert", async (msg) => {
-    if (msg.type !== "notify") return;
-    for (const m of msg.messages) {
-      if (!m || m.key.fromMe) continue;
-      const from = m.key.remoteJid ?? "";
-      const body = m.message?.conversation
-        ?? m.message?.extendedTextMessage?.text
-        ?? m.message?.buttonsResponseMessage?.selectedButtonId
-        ?? m.message?.listResponseMessage?.singleSelectReply?.selectedRowId
-        ?? "";
-      const isGroup = from.endsWith("@g.us");
-      const payload = {
-        id: m.key.id ?? null,
-        from,
-        body,
-        timestamp: m.messageTimestamp ? new Date(Number(m.messageTimestamp) * 1000).toISOString() : null,
-        type: "text",
-        isGroup,
-      };
-      await sock.readMessages([m.key]).catch(() => {});
-      await postWebhook(payload);
-    }
-  });
+    connecting = false;
+  } catch (e) {
+    console.error("[WA] connectToWhatsApp crashed:", e?.message ?? e);
+    connecting = false;
+    reconnectAttempts++;
+    const delay = Math.min(5000 * reconnectAttempts, MAX_RECONNECT_DELAY);
+    console.log(`[WA] Retrying in ${delay}ms...`);
+    setTimeout(connectToWhatsApp, delay);
+  }
+}
+
+async function resetConnection() {
+  ready = false;
+  authenticated = false;
+  lastQr = null;
+  userInfo = null;
+  if (sock) {
+    try { sock.end(undefined); } catch {}
+    sock = null;
+  }
+  clearAuthState(AUTH_DIR);
+  reconnectAttempts = 0;
+  connecting = false;
+  await connectToWhatsApp();
 }
 
 app.get("/status", (_req, res) => {
@@ -225,6 +257,7 @@ app.get("/status", (_req, res) => {
     ready,
     authenticated,
     hasQr: !!lastQr,
+    connecting,
     lastDisconnect,
     userInfo: userInfo ? { pushname: userInfo.name ?? null, phone: userInfo.id?.split(":")[0] ?? null } : null,
   });
@@ -233,6 +266,15 @@ app.get("/status", (_req, res) => {
 app.get("/qr", (_req, res) => {
   if (!lastQr) return res.status(404).json({ error: "no qr available" });
   res.json({ qr: lastQr });
+});
+
+app.post("/reset", requireToken, async (_req, res) => {
+  try {
+    await resetConnection();
+    res.json({ ok: true, message: "Connection reset. New QR will be generated." });
+  } catch (e) {
+    res.status(500).json({ error: e?.message ?? String(e) });
+  }
 });
 
 app.post("/send", requireToken, async (req, res) => {
@@ -271,24 +313,30 @@ app.post("/send", requireToken, async (req, res) => {
 app.post("/logout", requireToken, async (_req, res) => {
   try {
     if (sock) await sock.logout();
-    ready = false;
-    authenticated = false;
-    clearAuthState(AUTH_DIR);
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ error: e?.message ?? String(e) });
-  }
+  } catch {}
+  ready = false;
+  authenticated = false;
+  lastQr = null;
+  clearAuthState(AUTH_DIR);
+  res.json({ ok: true });
 });
 
 app.post("/pairing-code", requireToken, async (req, res) => {
   if (ready) return res.status(400).json({ error: "Already connected." });
   if (!sock) return res.status(503).json({ error: "WhatsApp client not initialized yet" });
-  const phoneNumber = String(req.body?.phoneNumber ?? "").trim();
-  if (!phoneNumber) return res.status(400).json({ error: "`phoneNumber` is required" });
+
+  const phoneNumber = String(req.body?.phoneNumber ?? "").replace(/\D/g, "").trim();
+  if (!phoneNumber || phoneNumber.length < 10) {
+    return res.status(400).json({ error: "Valid phone number with country code required (e.g. 919876543210)" });
+  }
+
   try {
+    console.log("[WA] Requesting pairing code for:", phoneNumber);
     const code = await sock.requestPairingCode(phoneNumber);
+    console.log("[WA] Pairing code received:", code);
     res.json({ ok: true, code });
   } catch (e) {
+    console.error("[WA] Pairing code error:", e?.message ?? e);
     res.status(500).json({ error: e?.message ?? String(e) });
   }
 });
@@ -320,10 +368,9 @@ app.get("/chats", requireToken, async (_req, res) => {
   }
 });
 
-// --- SPA fallback: serve index.html for non-API, non-file routes ---
 if (fs.existsSync(FRONTEND_DIR)) {
   app.get("*", (req, res) => {
-    if (req.path.startsWith("/api/") || req.path.startsWith("/status") || req.path.startsWith("/qr") || req.path.startsWith("/send") || req.path.startsWith("/logout") || req.path.startsWith("/pairing-code") || req.path.startsWith("/cancel-pairing") || req.path.startsWith("/chats")) {
+    if (req.path.startsWith("/api/") || ["/status", "/qr", "/send", "/logout", "/pairing-code", "/cancel-pairing", "/chats", "/reset"].some(r => req.path === r)) {
       return res.status(404).json({ error: "not found" });
     }
     res.sendFile(path.join(FRONTEND_DIR, "index.html"));
