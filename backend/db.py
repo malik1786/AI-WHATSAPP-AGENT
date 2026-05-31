@@ -244,7 +244,9 @@ else:
         cur = conn.execute("SELECT direction,text,created_at FROM conversations WHERE wa_id=? ORDER BY created_at DESC LIMIT ?;",(wa_id,limit)); rows = cur.fetchall(); rows.reverse(); return rows
     def cleanup_expired_pending(conn):
         cur = conn.execute("UPDATE pending_messages SET status='expired' WHERE status='pending' AND expires_at<=?;",(utcnow_iso(),)); conn.commit(); return cur.rowcount
-    def create_pending(conn, cwid, rid, orig, final, ttl):
+    def create_pending(conn=None, controller_wa_id=None, recipient_wa_id=None, original_request=None, final_message=None, ttl_seconds=600):
+        ttl = ttl_seconds
+        cwid, rid, orig, final = controller_wa_id, recipient_wa_id, original_request, final_message
         created = datetime.now(timezone.utc); expires = datetime.fromtimestamp(created.timestamp()+ttl,tz=timezone.utc).isoformat()
         cur = conn.execute("INSERT INTO pending_messages (controller_wa_id,recipient_wa_id,original_request,final_message,created_at,expires_at,status) VALUES (?,?,?,?,?,?,?);",(cwid,rid,orig,final,created.isoformat(),expires,"pending")); conn.commit(); return int(cur.lastrowid)
     def get_latest_pending(conn, cwid):
