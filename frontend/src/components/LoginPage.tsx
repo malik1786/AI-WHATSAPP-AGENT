@@ -1,3 +1,4 @@
+// Google OAuth login only
 import React, { useState } from "react";
 import { api, setToken } from "../api/client";
 import { Loader2, Bot } from "lucide-react";
