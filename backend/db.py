@@ -163,6 +163,50 @@ if USE_POSTGREST:
         _rest_update("users", {"coupon_code": code.strip().lower(), "is_unlimited": True, "max_replies": 999999}, f"wa_id=eq.{wa_id}")
         return True
 
+    def user_exists(conn=None, wa_id=None):
+        rows = _rest_get("users", f"wa_id=eq.{wa_id}&select=wa_id")
+        return len(rows) > 0
+
+    def count_pending_messages(conn=None):
+        rows = _rest_get("pending_messages", "status=eq.pending&select=id")
+        return len(rows)
+
+    def search_users_by_name(conn=None, tokens=None):
+        if not tokens:
+            return []
+        rows = _rest_get("users", "select=wa_id,display_name,last_seen_at")
+        results = []
+        for r in rows:
+            name = (r.get("display_name") or "").lower()
+            if all(t in name for t in tokens):
+                results.append(r)
+        results.sort(key=lambda x: x.get("last_seen_at") or "", reverse=True)
+        return results[:5]
+
+    def list_chats(conn=None):
+        users = _rest_get("users", "select=wa_id,display_name&order=last_seen_at.desc")
+        result = []
+        for u in users:
+            w = u["wa_id"]
+            convs = _rest_get("conversations", f"wa_id=eq.{w}&order=created_at.desc&limit=1&select=text,created_at")
+            last = convs[0] if convs else {}
+            result.append({
+                "id": w,
+                "name": u.get("display_name") or w,
+                "avatarUrl": None,
+                "lastMessage": last.get("text"),
+                "lastMessageAt": last.get("created_at"),
+                "unreadCount": 0,
+            })
+        result.sort(key=lambda x: (x["lastMessageAt"] is None, x["lastMessageAt"] or ""), reverse=False)
+        result.sort(key=lambda x: x["lastMessageAt"] is None)
+        result.sort(key=lambda x: (0 if x["lastMessageAt"] else 1, x["lastMessageAt"] or ""), reverse=True)
+        return result
+
+    def list_messages(conn=None, wa_id=None, limit=200):
+        rows = _rest_get("conversations", f"wa_id=eq.{wa_id}&order=created_at.asc&limit={limit}&select=id,wa_id,direction,text,created_at")
+        return rows
+
 else:
     # ---- SQLite fallback ----
     import sqlite3
@@ -230,3 +274,32 @@ else:
         from policy import is_valid_coupon
         if not is_valid_coupon(code): return False
         conn.execute("UPDATE users SET coupon_code=?,is_unlimited=1,max_replies=999999 WHERE wa_id=?;",(code.strip().lower(),wa_id)); conn.commit(); return True
+
+    def user_exists(conn, wa_id):
+        cur = conn.execute("SELECT 1 FROM users WHERE wa_id=? LIMIT 1;", (wa_id,))
+        return cur.fetchone() is not None
+
+    def count_pending_messages(conn):
+        row = conn.execute("SELECT COUNT(*) AS c FROM pending_messages WHERE status='pending';").fetchone()
+        return int(row["c"])
+
+    def search_users_by_name(conn, tokens):
+        if not tokens:
+            return []
+        where = " AND ".join(["LOWER(COALESCE(display_name,'')) LIKE ?"] * len(tokens))
+        params = [f"%{t}%" for t in tokens]
+        cur = conn.execute(f"SELECT wa_id, display_name, last_seen_at FROM users WHERE {where} ORDER BY last_seen_at DESC LIMIT 5;", params)
+        return [dict(r) for r in cur.fetchall()]
+
+    def list_chats(conn):
+        cur = conn.execute("""
+            SELECT u.wa_id AS id, COALESCE(u.display_name, u.wa_id) AS name, NULL AS avatarUrl,
+              (SELECT c.text FROM conversations c WHERE c.wa_id=u.wa_id ORDER BY c.created_at DESC LIMIT 1) AS lastMessage,
+              (SELECT c.created_at FROM conversations c WHERE c.wa_id=u.wa_id ORDER BY c.created_at DESC LIMIT 1) AS lastMessageAt
+            FROM users u ORDER BY (lastMessageAt IS NULL) ASC, lastMessageAt DESC;
+        """)
+        return [{"id": r["id"], "name": r["name"], "avatarUrl": r["avatarUrl"], "lastMessage": r["lastMessage"], "lastMessageAt": r["lastMessageAt"], "unreadCount": 0} for r in cur.fetchall()]
+
+    def list_messages(conn, wa_id, limit=200):
+        cur = conn.execute("SELECT id, wa_id, direction, text, created_at FROM conversations WHERE wa_id=? ORDER BY created_at ASC LIMIT ?;", (wa_id, limit))
+        return [dict(r) for r in cur.fetchall()]

@@ -27,6 +27,11 @@ from db import (
     can_user_reply,
     increment_reply_count,
     apply_coupon_code,
+    user_exists,
+    count_pending_messages,
+    search_users_by_name,
+    list_chats,
+    list_messages,
 )
 from gateway_client import GatewayClient
 from ai_engine import GroqChat, plan_action, polish_whatsapp_message, answer_factual_question, is_valid_reply, init_validator, get_validator, init_confidence_scorer, get_confidence_scorer
@@ -45,7 +50,8 @@ DEMO_CHAT_NAME = (os.getenv("DEMO_CHAT_NAME") or "Demo Chat").strip() or "Demo C
 _init_conn = connect(settings.db_path)
 init_schema(_init_conn)
 upsert_user(_init_conn, wa_id=DEMO_CHAT_ID, display_name=DEMO_CHAT_NAME, timezone_name=settings.default_timezone)
-_init_conn.close()
+if hasattr(_init_conn, "close"):
+    _init_conn.close()
 
 gateway = GatewayClient(base_url=settings.gateway_base_url, token=settings.gateway_token)
 groq = GroqChat(api_key=settings.groq_api_key, model=settings.groq_model) if settings.groq_api_key else None
@@ -109,7 +115,7 @@ def get_db():
 @app.teardown_appcontext
 def _close_db(_exc):
     db = g.pop("db", None)
-    if db is not None:
+    if db is not None and hasattr(db, "close"):
         db.close()
 
 
@@ -121,8 +127,7 @@ def _require_token(expected: str) -> bool:
 
 
 def _user_exists(conn, wa_id: str) -> bool:
-    cur = conn.execute("SELECT 1 FROM users WHERE wa_id=? LIMIT 1;", (wa_id,))
-    return cur.fetchone() is not None
+    return user_exists(conn, wa_id)
 
 
 def _resolve_recipient(
@@ -147,13 +152,7 @@ def _resolve_recipient(
     normalized = re.sub(r"[^a-z0-9]+", " ", hint.lower()).strip()
     tokens = [t for t in normalized.split() if t]
     if tokens:
-        where = " AND ".join(["LOWER(COALESCE(display_name,'')) LIKE ?"] * len(tokens))
-        params = [f"%{t}%" for t in tokens]
-        cur = conn.execute(
-            f"SELECT wa_id, display_name FROM users WHERE {where} ORDER BY last_seen_at DESC LIMIT 5;",
-            params,
-        )
-        rows = cur.fetchall()
+        rows = search_users_by_name(conn, tokens)
         if len(rows) == 1:
             return str(rows[0]["wa_id"])
 
@@ -594,9 +593,7 @@ def status():
 
     conn = get_db()
     cleanup_expired_pending(conn)
-    pending_count = int(
-        conn.execute("SELECT COUNT(*) AS c FROM pending_messages WHERE status='pending';").fetchone()["c"]
-    )
+    pending_count = count_pending_messages(conn)
 
     return jsonify(
         {
@@ -737,62 +734,25 @@ def api_gateway_reset():
 @app.get("/api/chats")
 def api_list_chats():
     conn = get_db()
-    cur = conn.execute(
-        """
-        SELECT
-          u.wa_id AS id,
-          COALESCE(u.display_name, u.wa_id) AS name,
-          NULL AS avatarUrl,
-          (
-            SELECT c.text FROM conversations c
-            WHERE c.wa_id=u.wa_id
-            ORDER BY c.created_at DESC
-            LIMIT 1
-          ) AS lastMessage,
-          (
-            SELECT c.created_at FROM conversations c
-            WHERE c.wa_id=u.wa_id
-            ORDER BY c.created_at DESC
-            LIMIT 1
-          ) AS lastMessageAt
-        FROM users u
-        ORDER BY (lastMessageAt IS NULL) ASC, lastMessageAt DESC;
-        """
-    )
-    chats = []
-    for r in cur.fetchall():
-        chats.append(
-            {
-                "id": r["id"],
-                "name": r["name"],
-                "avatarUrl": r["avatarUrl"],
-                "lastMessage": r["lastMessage"],
-                "lastMessageAt": r["lastMessageAt"],
-                "unreadCount": 0,
-            }
-        )
+    chats = list_chats(conn)
     return jsonify({"chats": chats})
 
 
 @app.get("/api/chats/<chat_id>/messages")
 def api_list_messages(chat_id: str):
     conn = get_db()
-    cur = conn.execute(
-        "SELECT id, wa_id, direction, text, created_at FROM conversations WHERE wa_id=? ORDER BY created_at ASC LIMIT 200;",
-        (chat_id,),
-    )
-    messages = []
-    for r in cur.fetchall():
-        messages.append(
-            {
-                "id": str(r["id"]),
-                "chatId": r["wa_id"],
-                "direction": r["direction"],
-                "text": r["text"],
-                "createdAt": r["created_at"],
-                "status": "sent",
-            }
-        )
+    rows = list_messages(conn, chat_id)
+    messages = [
+        {
+            "id": str(r["id"]),
+            "chatId": r["wa_id"],
+            "direction": r["direction"],
+            "text": r["text"],
+            "createdAt": r["created_at"],
+            "status": "sent",
+        }
+        for r in rows
+    ]
     return jsonify({"messages": messages})
 
 
