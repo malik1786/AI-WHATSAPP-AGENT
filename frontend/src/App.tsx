@@ -66,6 +66,8 @@ export default function App() {
 
   const listRef = useRef<HTMLDivElement | null>(null);
   const syncedChatsRef = useRef(false);
+  const lastQrRef = useRef<string | null>(null);
+  const staleQrCountRef = useRef(0);
 
   const filteredChats = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -90,16 +92,41 @@ export default function App() {
       if (ready) {
         setQrText(null);
         setGatewayStatusText("Connected");
+        lastQrRef.current = null;
+        staleQrCountRef.current = 0;
         if (!syncedChatsRef.current) { syncedChatsRef.current = true; await syncGatewayChats(); }
         return;
       }
       syncedChatsRef.current = false;
       if (status.hasQr) {
-        setGatewayStatusText("Scan QR to connect");
         try {
           const qr = await api.gatewayQr();
-          console.log("[GW QR] received, length:", qr.qr?.length);
-          setQrText(qr.qr);
+          const qrVal = qr.qr;
+          console.log("[GW QR] received, length:", qrVal?.length);
+
+          if (qrVal && qrVal === lastQrRef.current) {
+            staleQrCountRef.current++;
+          } else {
+            staleQrCountRef.current = 0;
+          }
+          lastQrRef.current = qrVal;
+
+          if (staleQrCountRef.current >= 5) {
+            console.log("[GW QR] stale QR detected, auto-resetting");
+            setGatewayStatusText("QR expired — resetting...");
+            setQrText(null);
+            staleQrCountRef.current = 0;
+            lastQrRef.current = null;
+            try { await api.gatewayReset(); } catch {}
+            return;
+          }
+
+          if (staleQrCountRef.current >= 2) {
+            setGatewayStatusText("QR may be stale — resetting...");
+          } else {
+            setGatewayStatusText("Scan QR to connect");
+          }
+          setQrText(qrVal);
         } catch (e: any) {
           console.error("[GW QR] error:", e?.status, e?.message, e?.payload);
           if (e instanceof ApiError && e.status === 404) { setQrText(null); setGatewayStatusText("Waiting... (QR not ready yet)"); }
@@ -111,6 +138,8 @@ export default function App() {
         if (status.connecting) parts.push("(connecting)");
         if (status.userInfo) parts.push(`user: ${status.userInfo.pushname}`);
         setQrText(null);
+        lastQrRef.current = null;
+        staleQrCountRef.current = 0;
         setGatewayStatusText(parts.join(" "));
       }
     } catch (e: any) {
