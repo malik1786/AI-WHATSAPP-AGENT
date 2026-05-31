@@ -93,6 +93,7 @@ export default function App() {
       setGatewayReady(ready);
       if (ready) {
         setQrText(null);
+        setQrOpen(false);
         setGatewayStatusText("Connected");
         lastQrRef.current = null;
         staleQrCountRef.current = 0;
@@ -100,6 +101,8 @@ export default function App() {
         return;
       }
       syncedChatsRef.current = false;
+      // Auto-open QR modal when not connected
+      if (!qrOpen) setQrOpen(true);
       if (status.hasQr) {
         try {
           const qr = await api.gatewayQr();
