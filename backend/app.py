@@ -7,6 +7,7 @@ from flask import Flask, jsonify, request, send_from_directory, g
 from flask_cors import CORS
 
 from config import load_settings
+from auth import hash_password, verify_password, create_token, require_auth
 from db import (
     connect,
     init_schema,
@@ -32,6 +33,9 @@ from db import (
     search_users_by_name,
     list_chats,
     list_messages,
+    USE_POSTGREST,
+    _rest_get,
+    _rest_insert,
 )
 from gateway_client import GatewayClient
 from ai_engine import GroqChat, plan_action, polish_whatsapp_message, answer_factual_question, is_valid_reply, init_validator, get_validator, init_confidence_scorer, get_confidence_scorer
@@ -80,6 +84,60 @@ def _get_owner_name() -> str:
 
 app = Flask(__name__, static_folder=None)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
+
+
+# ---------------------------
+# Auth API
+# ---------------------------
+
+@app.post("/api/auth/signup")
+def auth_signup():
+    data = request.get_json(silent=True) or {}
+    email = str(data.get("email") or "").strip().lower()
+    password = str(data.get("password") or "").strip()
+    if not email or not password or len(password) < 6:
+        return jsonify({"error": "Email and password (min 6 chars) required"}), 400
+    conn = get_db()
+    existing = _rest_get("app_users", f"email=eq.{email}&select=id") if USE_POSTGREST else []
+    if existing:
+        return jsonify({"error": "Email already registered"}), 409
+    pw_hash = hash_password(password)
+    if USE_POSTGREST:
+        result = _rest_insert("app_users", {"email": email, "password_hash": pw_hash})
+        user_id = result[0]["id"] if result else 0
+    else:
+        cur = conn.execute("INSERT INTO app_users (email, password_hash) VALUES (?, ?)", (email, pw_hash))
+        conn.commit()
+        user_id = cur.lastrowid
+    token = create_token(user_id, email)
+    return jsonify({"token": token, "email": email, "id": user_id})
+
+
+@app.post("/api/auth/login")
+def auth_login():
+    data = request.get_json(silent=True) or {}
+    email = str(data.get("email") or "").strip().lower()
+    password = str(data.get("password") or "").strip()
+    if not email or not password:
+        return jsonify({"error": "Email and password required"}), 400
+    conn = get_db()
+    if USE_POSTGREST:
+        rows = _rest_get("app_users", f"email=eq.{email}&select=id,password_hash")
+        row = rows[0] if rows else None
+    else:
+        cur = conn.execute("SELECT id, password_hash FROM app_users WHERE email=?", (email,))
+        row = cur.fetchone()
+        row = {"id": row["id"], "password_hash": row["password_hash"]} if row else None
+    if not row or not verify_password(password, row["password_hash"]):
+        return jsonify({"error": "Invalid email or password"}), 401
+    token = create_token(row["id"], email)
+    return jsonify({"token": token, "email": email, "id": row["id"]})
+
+
+@app.get("/api/auth/me")
+@require_auth
+def auth_me():
+    return jsonify({"id": request.user_id, "email": request.user_email})
 
 
 # ---------------------------

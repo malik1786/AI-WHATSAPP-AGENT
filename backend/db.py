@@ -74,74 +74,116 @@ if USE_POSTGREST:
         r.raise_for_status()
         return r.json()
 
-    def upsert_user(conn=None, wa_id=None, display_name=None, timezone_name=None):
+    def upsert_user(conn=None, wa_id=None, display_name=None, timezone_name=None, owner_id=None):
         now = utcnow_iso()
-        _rest_upsert("users", {"wa_id": wa_id, "display_name": display_name, "timezone": timezone_name, "created_at": now, "last_seen_at": now}, on_conflict="wa_id")
+        data = {"wa_id": wa_id, "display_name": display_name, "timezone": timezone_name, "created_at": now, "last_seen_at": now}
+        if owner_id is not None:
+            data["owner_id"] = owner_id
+        _rest_upsert("users", data, on_conflict="wa_id")
 
-    def set_user_instructions(conn=None, wa_id=None, instructions=None):
-        _rest_update("users", {"instructions": instructions}, f"wa_id=eq.{wa_id}")
+    def set_user_instructions(conn=None, wa_id=None, instructions=None, owner_id=None):
+        filter_str = f"wa_id=eq.{wa_id}"
+        if owner_id is not None:
+            filter_str += f"&owner_id=eq.{owner_id}"
+        _rest_update("users", {"instructions": instructions}, filter_str)
 
-    def get_user_instructions(conn=None, wa_id=None):
-        rows = _rest_get("users", f"wa_id=eq.{wa_id}&select=instructions")
+    def get_user_instructions(conn=None, wa_id=None, owner_id=None):
+        params = f"wa_id=eq.{wa_id}&select=instructions"
+        if owner_id is not None:
+            params += f",owner_id&owner_id=eq.{owner_id}"
+        rows = _rest_get("users", params)
         return rows[0]["instructions"] if rows and rows[0].get("instructions") else None
 
-    def add_conversation(conn=None, wa_id=None, direction=None, text=None, message_id=None):
-        result = _rest_insert("conversations", {"wa_id": wa_id, "direction": direction, "text": text, "message_id": message_id, "created_at": utcnow_iso()})
+    def add_conversation(conn=None, wa_id=None, direction=None, text=None, message_id=None, owner_id=None):
+        data = {"wa_id": wa_id, "direction": direction, "text": text, "message_id": message_id, "created_at": utcnow_iso()}
+        if owner_id is not None:
+            data["owner_id"] = owner_id
+        result = _rest_insert("conversations", data)
         return result[0]["id"] if result else 0
 
-    def get_last_messages(conn=None, wa_id=None, limit=5):
-        rows = _rest_get("conversations", f"wa_id=eq.{wa_id}&order=created_at.desc&limit={limit}")
+    def get_last_messages(conn=None, wa_id=None, limit=5, owner_id=None):
+        params = f"wa_id=eq.{wa_id}&order=created_at.desc&limit={limit}"
+        if owner_id is not None:
+            params += f"&owner_id=eq.{owner_id}"
+        rows = _rest_get("conversations", params)
         rows.reverse()
         return rows
 
-    def cleanup_expired_pending(conn=None):
+    def cleanup_expired_pending(conn=None, owner_id=None):
         now = utcnow_iso()
-        _rest_update("pending_messages", {"status": "expired"}, f"status=eq.pending&expires_at=lte.{now}")
+        filter_str = f"status=eq.pending&expires_at=lte.{now}"
+        if owner_id is not None:
+            filter_str += f"&owner_id=eq.{owner_id}"
+        _rest_update("pending_messages", {"status": "expired"}, filter_str)
         return 0
 
-    def create_pending(conn=None, controller_wa_id=None, recipient_wa_id=None, original_request=None, final_message=None, ttl_seconds=600):
+    def create_pending(conn=None, controller_wa_id=None, recipient_wa_id=None, original_request=None, final_message=None, ttl_seconds=600, owner_id=None):
         now = datetime.now(timezone.utc)
         expires = datetime.fromtimestamp(now.timestamp() + ttl_seconds, tz=timezone.utc).isoformat()
-        result = _rest_insert("pending_messages", {"controller_wa_id": controller_wa_id, "recipient_wa_id": recipient_wa_id, "original_request": original_request, "final_message": final_message, "created_at": now.isoformat(), "expires_at": expires, "status": "pending"})
+        data = {"controller_wa_id": controller_wa_id, "recipient_wa_id": recipient_wa_id, "original_request": original_request, "final_message": final_message, "created_at": now.isoformat(), "expires_at": expires, "status": "pending"}
+        if owner_id is not None:
+            data["owner_id"] = owner_id
+        result = _rest_insert("pending_messages", data)
         return result[0]["id"] if result else 0
 
-    def get_latest_pending(conn=None, controller_wa_id=None):
+    def get_latest_pending(conn=None, controller_wa_id=None, owner_id=None):
         now = utcnow_iso()
-        rows = _rest_get("pending_messages", f"controller_wa_id=eq.{controller_wa_id}&status=eq.pending&expires_at=gt.{now}&order=created_at.desc&limit=1")
+        params = f"controller_wa_id=eq.{controller_wa_id}&status=eq.pending&expires_at=gt.{now}&order=created_at.desc&limit=1"
+        if owner_id is not None:
+            params += f"&owner_id=eq.{owner_id}"
+        rows = _rest_get("pending_messages", params)
         return rows[0] if rows else None
 
-    def set_pending_status(conn=None, pending_id=None, status=None):
-        _rest_update("pending_messages", {"status": status}, f"id=eq.{pending_id}")
+    def set_pending_status(conn=None, pending_id=None, status=None, owner_id=None):
+        filter_str = f"id=eq.{pending_id}"
+        if owner_id is not None:
+            filter_str += f"&owner_id=eq.{owner_id}"
+        _rest_update("pending_messages", {"status": status}, filter_str)
 
-    def count_outgoing_last_hour(conn=None, wa_id=None):
+    def count_outgoing_last_hour(conn=None, wa_id=None, owner_id=None):
         cutoff_iso = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() - 3600, tz=timezone.utc).isoformat()
         if wa_id:
-            rows = _rest_get("conversations", f"wa_id=eq.{wa_id}&direction=eq.out&created_at=gte.{cutoff_iso}&select=id")
+            params = f"wa_id=eq.{wa_id}&direction=eq.out&created_at=gte.{cutoff_iso}&select=id"
         else:
-            rows = _rest_get("conversations", f"direction=eq.out&created_at=gte.{cutoff_iso}&select=id")
+            params = f"direction=eq.out&created_at=gte.{cutoff_iso}&select=id"
+        if owner_id is not None:
+            params += f"&owner_id=eq.{owner_id}"
+        rows = _rest_get("conversations", params)
         return len(rows)
 
-    def get_app_state(conn=None, key=None):
-        rows = _rest_get("app_state", f"key=eq.{key}&select=value")
+    def get_app_state(conn=None, key=None, owner_id=None):
+        params = f"key=eq.{key}&select=value"
+        if owner_id is not None:
+            params += f"&owner_id=eq.{owner_id}"
+        rows = _rest_get("app_state", params)
         return rows[0]["value"] if rows else None
 
-    def set_app_state(conn=None, key=None, value=None):
-        _rest_upsert("app_state", {"key": key, "value": value, "updated_at": utcnow_iso()}, on_conflict="key")
+    def set_app_state(conn=None, key=None, value=None, owner_id=None):
+        data = {"key": key, "value": value, "updated_at": utcnow_iso()}
+        if owner_id is not None:
+            data["owner_id"] = owner_id
+        _rest_upsert("app_state", data, on_conflict="key")
 
-    def is_away_mode(conn=None):
-        return get_app_state(conn, "away_mode") == "on"
+    def is_away_mode(conn=None, owner_id=None):
+        return get_app_state(conn, "away_mode", owner_id=owner_id) == "on"
 
-    def set_away_mode(conn=None, enabled=False):
-        set_app_state(conn, "away_mode", "on" if enabled else "off")
+    def set_away_mode(conn=None, enabled=False, owner_id=None):
+        set_app_state(conn, "away_mode", "on" if enabled else "off", owner_id=owner_id)
 
-    def store_away_message(conn=None, wa_id=None, text=None, message_id=None):
-        result = _rest_insert("away_messages", {"wa_id": wa_id, "message_id": message_id, "text": text, "received_at": utcnow_iso()})
+    def store_away_message(conn=None, wa_id=None, text=None, message_id=None, owner_id=None):
+        data = {"wa_id": wa_id, "message_id": message_id, "text": text, "received_at": utcnow_iso()}
+        if owner_id is not None:
+            data["owner_id"] = owner_id
+        result = _rest_insert("away_messages", data)
         return result[0]["id"] if result else 0
 
-    def get_away_messages(conn=None, limit=50):
-        return _rest_get("away_messages", f"order=received_at.desc&limit={limit}")
+    def get_away_messages(conn=None, limit=50, owner_id=None):
+        params = f"order=received_at.desc&limit={limit}"
+        if owner_id is not None:
+            params = f"owner_id=eq.{owner_id}&" + params
+        return _rest_get("away_messages", params)
 
-    def get_user_reply_info(conn=None, wa_id=None):
+    def get_user_reply_info(conn=None, wa_id=None, owner_id=None):
         rows = _rest_get("users", f"wa_id=eq.{wa_id}&select=reply_count,max_replies,is_unlimited,coupon_code")
         if not rows:
             return {"reply_count": 0, "max_replies": 15, "is_unlimited": False, "coupon_code": None}
@@ -183,12 +225,18 @@ if USE_POSTGREST:
         results.sort(key=lambda x: x.get("last_seen_at") or "", reverse=True)
         return results[:5]
 
-    def list_chats(conn=None):
-        users = _rest_get("users", "select=wa_id,display_name&order=last_seen_at.desc")
+    def list_chats(conn=None, owner_id=None):
+        params = "select=wa_id,display_name&order=last_seen_at.desc"
+        if owner_id is not None:
+            params = f"owner_id=eq.{owner_id}&" + params
+        users = _rest_get("users", params)
         result = []
         for u in users:
             w = u["wa_id"]
-            convs = _rest_get("conversations", f"wa_id=eq.{w}&order=created_at.desc&limit=1&select=text,created_at")
+            conv_params = f"wa_id=eq.{w}&order=created_at.desc&limit=1&select=text,created_at"
+            if owner_id is not None:
+                conv_params += f"&owner_id=eq.{owner_id}"
+            convs = _rest_get("conversations", conv_params)
             last = convs[0] if convs else {}
             result.append({
                 "id": w,
@@ -203,8 +251,11 @@ if USE_POSTGREST:
         result.sort(key=lambda x: (0 if x["lastMessageAt"] else 1, x["lastMessageAt"] or ""), reverse=True)
         return result
 
-    def list_messages(conn=None, wa_id=None, limit=200):
-        rows = _rest_get("conversations", f"wa_id=eq.{wa_id}&order=created_at.asc&limit={limit}&select=id,wa_id,direction,text,created_at")
+    def list_messages(conn=None, wa_id=None, limit=200, owner_id=None):
+        params = f"wa_id=eq.{wa_id}&order=created_at.asc&limit={limit}&select=id,wa_id,direction,text,created_at"
+        if owner_id is not None:
+            params += f"&owner_id=eq.{owner_id}"
+        rows = _rest_get("conversations", params)
         return rows
 
 else:
@@ -233,59 +284,59 @@ else:
             except sqlite3.OperationalError: pass
         conn.commit()
 
-    def upsert_user(conn, wa_id, display_name, timezone_name):
+    def upsert_user(conn, wa_id, display_name, timezone_name, owner_id=None):
         now = utcnow_iso(); conn.execute("INSERT INTO users (wa_id,display_name,timezone,created_at,last_seen_at) VALUES (?,?,?,?,?) ON CONFLICT(wa_id) DO UPDATE SET display_name=COALESCE(excluded.display_name,users.display_name),timezone=COALESCE(users.timezone,excluded.timezone),last_seen_at=excluded.last_seen_at;",(wa_id,display_name,timezone_name,now,now)); conn.commit()
-    def set_user_instructions(conn, wa_id, instructions): conn.execute("UPDATE users SET instructions=? WHERE wa_id=?;",(instructions,wa_id)); conn.commit()
-    def get_user_instructions(conn, wa_id):
+    def set_user_instructions(conn, wa_id, instructions, owner_id=None): conn.execute("UPDATE users SET instructions=? WHERE wa_id=?;",(instructions,wa_id)); conn.commit()
+    def get_user_instructions(conn, wa_id, owner_id=None):
         cur = conn.execute("SELECT instructions FROM users WHERE wa_id=?;",(wa_id,)); row = cur.fetchone(); return row["instructions"] if row and row["instructions"] else None
-    def add_conversation(conn, wa_id, direction, text, message_id=None):
+    def add_conversation(conn, wa_id, direction, text, message_id=None, owner_id=None):
         cur = conn.execute("INSERT INTO conversations (wa_id,direction,text,message_id,created_at) VALUES (?,?,?,?,?);",(wa_id,direction,text,message_id,utcnow_iso())); conn.commit(); return int(cur.lastrowid)
-    def get_last_messages(conn, wa_id, limit):
+    def get_last_messages(conn, wa_id, limit, owner_id=None):
         cur = conn.execute("SELECT direction,text,created_at FROM conversations WHERE wa_id=? ORDER BY created_at DESC LIMIT ?;",(wa_id,limit)); rows = cur.fetchall(); rows.reverse(); return rows
-    def cleanup_expired_pending(conn):
+    def cleanup_expired_pending(conn, owner_id=None):
         cur = conn.execute("UPDATE pending_messages SET status='expired' WHERE status='pending' AND expires_at<=?;",(utcnow_iso(),)); conn.commit(); return cur.rowcount
-    def create_pending(conn=None, controller_wa_id=None, recipient_wa_id=None, original_request=None, final_message=None, ttl_seconds=600):
+    def create_pending(conn=None, controller_wa_id=None, recipient_wa_id=None, original_request=None, final_message=None, ttl_seconds=600, owner_id=None):
         ttl = ttl_seconds
         cwid, rid, orig, final = controller_wa_id, recipient_wa_id, original_request, final_message
         created = datetime.now(timezone.utc); expires = datetime.fromtimestamp(created.timestamp()+ttl,tz=timezone.utc).isoformat()
         cur = conn.execute("INSERT INTO pending_messages (controller_wa_id,recipient_wa_id,original_request,final_message,created_at,expires_at,status) VALUES (?,?,?,?,?,?,?);",(cwid,rid,orig,final,created.isoformat(),expires,"pending")); conn.commit(); return int(cur.lastrowid)
-    def get_latest_pending(conn, cwid):
+    def get_latest_pending(conn, cwid, owner_id=None):
         cur = conn.execute("SELECT * FROM pending_messages WHERE controller_wa_id=? AND status='pending' AND expires_at>? ORDER BY created_at DESC LIMIT 1;",(cwid,utcnow_iso())); return cur.fetchone()
-    def set_pending_status(conn, pid, status): conn.execute("UPDATE pending_messages SET status=? WHERE id=?;",(status,pid)); conn.commit()
-    def count_outgoing_last_hour(conn, wa_id=None):
+    def set_pending_status(conn, pid, status, owner_id=None): conn.execute("UPDATE pending_messages SET status=? WHERE id=?;",(status,pid)); conn.commit()
+    def count_outgoing_last_hour(conn, wa_id=None, owner_id=None):
         ci = datetime.fromtimestamp(datetime.now(timezone.utc).timestamp()-3600,tz=timezone.utc).isoformat()
         if wa_id: cur = conn.execute("SELECT COUNT(*) AS c FROM conversations WHERE direction='out' AND wa_id=? AND created_at>=?;",(wa_id,ci))
         else: cur = conn.execute("SELECT COUNT(*) AS c FROM conversations WHERE direction='out' AND created_at>=?;",(ci,))
         return int(cur.fetchone()["c"])
-    def get_app_state(conn, key):
+    def get_app_state(conn, key, owner_id=None):
         cur = conn.execute("SELECT value FROM app_state WHERE key=?;",(key,)); row = cur.fetchone(); return row["value"] if row else None
-    def set_app_state(conn, key, value): conn.execute("INSERT INTO app_state (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at;",(key,value,utcnow_iso())); conn.commit()
-    def is_away_mode(conn): return get_app_state(conn,"away_mode")=="on"
-    def set_away_mode(conn, e): set_app_state(conn,"away_mode","on" if e else "off")
-    def store_away_message(conn, wa_id, text, mid):
+    def set_app_state(conn, key, value, owner_id=None): conn.execute("INSERT INTO app_state (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at;",(key,value,utcnow_iso())); conn.commit()
+    def is_away_mode(conn, owner_id=None): return get_app_state(conn,"away_mode")=="on"
+    def set_away_mode(conn, e, owner_id=None): set_app_state(conn,"away_mode","on" if e else "off")
+    def store_away_message(conn, wa_id, text, mid, owner_id=None):
         cur = conn.execute("INSERT INTO away_messages (wa_id,message_id,text,received_at) VALUES (?,?,?,?);",(wa_id,mid,text,utcnow_iso())); conn.commit(); return int(cur.lastrowid)
-    def get_away_messages(conn, limit=50): return conn.execute("SELECT * FROM away_messages ORDER BY received_at DESC LIMIT ?;",(limit,)).fetchall()
-    def get_user_reply_info(conn, wa_id):
+    def get_away_messages(conn, limit=50, owner_id=None): return conn.execute("SELECT * FROM away_messages ORDER BY received_at DESC LIMIT ?;",(limit,)).fetchall()
+    def get_user_reply_info(conn, wa_id, owner_id=None):
         cur = conn.execute("SELECT reply_count,max_replies,is_unlimited,coupon_code FROM users WHERE wa_id=?;",(wa_id,)); row = cur.fetchone()
         if not row: return {"reply_count":0,"max_replies":15,"is_unlimited":False,"coupon_code":None}
         return {"reply_count":row["reply_count"],"max_replies":row["max_replies"],"is_unlimited":bool(row["is_unlimited"]),"coupon_code":row["coupon_code"]}
     def can_user_reply(conn, wa_id):
         info = get_user_reply_info(conn,wa_id); return info["is_unlimited"] or info["reply_count"]<info["max_replies"]
-    def increment_reply_count(conn, wa_id): conn.execute("UPDATE users SET reply_count=reply_count+1 WHERE wa_id=?;",(wa_id,)); conn.commit()
-    def apply_coupon_code(conn, wa_id, code):
+    def increment_reply_count(conn, wa_id, owner_id=None): conn.execute("UPDATE users SET reply_count=reply_count+1 WHERE wa_id=?;",(wa_id,)); conn.commit()
+    def apply_coupon_code(conn, wa_id, code, owner_id=None):
         from policy import is_valid_coupon
         if not is_valid_coupon(code): return False
         conn.execute("UPDATE users SET coupon_code=?,is_unlimited=1,max_replies=999999 WHERE wa_id=?;",(code.strip().lower(),wa_id)); conn.commit(); return True
 
-    def user_exists(conn, wa_id):
+    def user_exists(conn, wa_id, owner_id=None):
         cur = conn.execute("SELECT 1 FROM users WHERE wa_id=? LIMIT 1;", (wa_id,))
         return cur.fetchone() is not None
 
-    def count_pending_messages(conn):
+    def count_pending_messages(conn, owner_id=None):
         row = conn.execute("SELECT COUNT(*) AS c FROM pending_messages WHERE status='pending';").fetchone()
         return int(row["c"])
 
-    def search_users_by_name(conn, tokens):
+    def search_users_by_name(conn, tokens, owner_id=None):
         if not tokens:
             return []
         where = " AND ".join(["LOWER(COALESCE(display_name,'')) LIKE ?"] * len(tokens))
@@ -293,7 +344,7 @@ else:
         cur = conn.execute(f"SELECT wa_id, display_name, last_seen_at FROM users WHERE {where} ORDER BY last_seen_at DESC LIMIT 5;", params)
         return [dict(r) for r in cur.fetchall()]
 
-    def list_chats(conn):
+    def list_chats(conn, owner_id=None):
         cur = conn.execute("""
             SELECT u.wa_id AS id, COALESCE(u.display_name, u.wa_id) AS name, NULL AS avatarUrl,
               (SELECT c.text FROM conversations c WHERE c.wa_id=u.wa_id ORDER BY c.created_at DESC LIMIT 1) AS lastMessage,
@@ -302,6 +353,6 @@ else:
         """)
         return [{"id": r["id"], "name": r["name"], "avatarUrl": r["avatarUrl"], "lastMessage": r["lastMessage"], "lastMessageAt": r["lastMessageAt"], "unreadCount": 0} for r in cur.fetchall()]
 
-    def list_messages(conn, wa_id, limit=200):
+    def list_messages(conn, wa_id, limit=200, owner_id=None):
         cur = conn.execute("SELECT id, wa_id, direction, text, created_at FROM conversations WHERE wa_id=? ORDER BY created_at ASC LIMIT ?;", (wa_id, limit))
         return [dict(r) for r in cur.fetchall()]
