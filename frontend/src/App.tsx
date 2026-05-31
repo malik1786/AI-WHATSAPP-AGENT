@@ -19,7 +19,7 @@ import {
   User,
   Zap,
 } from "lucide-react";
-import { ApiError, api } from "./api/client";
+import { ApiError, api, isLoggedIn, clearToken } from "./api/client";
 import type { ChatSummary, Message } from "./api/types";
 import ChatListItem from "./components/ChatListItem";
 import MessageBubble from "./components/MessageBubble";
@@ -29,6 +29,7 @@ import QrModal from "./components/QrModal";
 import QrCard from "./components/QrCard";
 import ChatTemplates from "./components/ChatTemplates";
 import PersonalizationPanel from "./components/PersonalizationPanel";
+import LoginPage from "./components/LoginPage";
 import { cx } from "./lib/cls";
 
 type Health = { ok: true; time: string };
@@ -36,6 +37,7 @@ type Health = { ok: true; time: string };
 type Panel = "chats" | "templates" | "settings";
 
 export default function App() {
+  const [loggedIn, setLoggedIn] = useState(isLoggedIn());
   const [health, setHealth] = useState<Health | null>(null);
   const [gatewayReady, setGatewayReady] = useState(false);
   const [gatewayStatusText, setGatewayStatusText] = useState("Checking gateway...");
@@ -275,6 +277,13 @@ export default function App() {
             >
               <Settings2 size={15} />
             </button>
+            <button
+              className="grid h-8 w-8 place-items-center rounded-lg text-wa-subtext hover:text-red-500 hover:bg-wa-hover transition-all"
+              onClick={() => { clearToken(); setLoggedIn(false); }}
+              title="Logout"
+            >
+              <WifiOff size={15} />
+            </button>
           </div>
         </div>
       </div>
@@ -423,6 +432,11 @@ export default function App() {
         <QrModal open={qrOpen} qr={qrText} statusText={gatewayStatusText} onClose={() => setQrOpen(false)} />
       </div>
     );
+  }
+
+  /* ─── AUTH CHECK ─── */
+  if (!loggedIn) {
+    return <LoginPage onLogin={() => setLoggedIn(true)} />;
   }
 
   /* ─── MAIN APP ─── */

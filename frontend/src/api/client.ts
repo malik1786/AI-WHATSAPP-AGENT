@@ -26,6 +26,22 @@ export class ApiError extends Error {
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
 
+function getToken(): string | null {
+  return localStorage.getItem("wa_token");
+}
+
+export function setToken(token: string) {
+  localStorage.setItem("wa_token", token);
+}
+
+export function clearToken() {
+  localStorage.removeItem("wa_token");
+}
+
+export function isLoggedIn(): boolean {
+  return !!getToken();
+}
+
 async function safeJson(res: Response): Promise<unknown> {
   const text = await res.text();
   if (!text) return undefined;
@@ -38,11 +54,13 @@ async function safeJson(res: Response): Promise<unknown> {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const url = `${API_BASE}${path}`;
+  const token = getToken();
   console.log(`[API] ${init?.method ?? "GET"} ${url}`);
   const res = await fetch(url, {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers ?? {}),
     },
   });
@@ -104,4 +122,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify({}),
     }),
+  authSignup: (email: string, password: string) =>
+    request<{ token: string; email: string; id: number }>("/api/auth/signup", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    }),
+  authLogin: (email: string, password: string) =>
+    request<{ token: string; email: string; id: number }>("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    }),
+  authMe: () => request<{ id: number; email: string }>("/api/auth/me"),
 };
