@@ -36,6 +36,7 @@ from db import (
     USE_POSTGREST,
     _rest_get,
     _rest_insert,
+    _rest_update,
 )
 from gateway_client import GatewayClient
 from ai_engine import GroqChat, plan_action, polish_whatsapp_message, answer_factual_question, is_valid_reply, init_validator, get_validator, init_confidence_scorer, get_confidence_scorer
