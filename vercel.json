@@ -9,7 +9,7 @@
       "dest": "/api/index.py"
     },
     {
-      "src": "/(webhook|send|logout|status)",
+      "src": "/(webhook|send|logout|status|api/auth/google/callback)",
       "dest": "/api/index.py"
     },
     {

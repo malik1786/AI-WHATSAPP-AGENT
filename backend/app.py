@@ -188,6 +188,71 @@ async def auth_google():
     return jsonify({"token": token, "email": email, "name": name, "id": user_id})
 
 
+@app.get("/api/auth/google/callback")
+def auth_google_callback():
+    code = request.args.get("code", "")
+    if not code:
+        return jsonify({"error": "Missing authorization code"}), 400
+
+    import json
+    from urllib.request import urlopen, Request
+    from urllib.parse import urlencode
+
+    try:
+        token_data = urlencode({
+            "code": code,
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": os.getenv("GOOGLE_CLIENT_SECRET", ""),
+            "redirect_uri": request.host_url.rstrip("/") + "/api/auth/google/callback",
+            "grant_type": "authorization_code",
+        }).encode()
+
+        req = Request("https://oauth2.googleapis.com/token", data=token_data, method="POST")
+        req.add_header("Content-Type", "application/x-www-form-urlencoded")
+        with urlopen(req, timeout=10) as resp:
+            tokens = json.loads(resp.read())
+            id_token = tokens.get("id_token", "")
+
+        # Verify the ID token
+        import asyncio
+        google_user = asyncio.run(verify_google_token(id_token))
+        if not google_user:
+            return "Invalid Google token", 401
+
+        email = google_user["email"].lower()
+        name = google_user["name"]
+        conn = get_db()
+
+        if USE_POSTGREST:
+            rows = _rest_get("app_users", f"email=eq.{email}&select=id")
+            row = rows[0] if rows else None
+        else:
+            cur = conn.execute("SELECT id FROM app_users WHERE email=?", (email,))
+            row = cur.fetchone()
+            row = {"id": row["id"]} if row else None
+
+        if row:
+            user_id = row["id"]
+            if USE_POSTGREST:
+                _rest_update("app_users", {"display_name": name}, f"id=eq.{user_id}")
+            else:
+                conn.execute("UPDATE app_users SET display_name=? WHERE id=?", (name, user_id))
+                conn.commit()
+        else:
+            if USE_POSTGREST:
+                result = _rest_insert("app_users", {"email": email, "password_hash": "google_oauth", "display_name": name})
+                user_id = result[0]["id"] if result else 0
+            else:
+                cur = conn.execute("INSERT INTO app_users (email, password_hash, display_name) VALUES (?, ?, ?)", (email, "google_oauth", name))
+                conn.commit()
+                user_id = cur.lastrowid
+
+        token = create_token(user_id, email, name)
+        return f'<script>window.location.href="/?token={token}";</script>'
+    except Exception as e:
+        return f"Google auth failed: {str(e)}", 500
+
+
 # ---------------------------
 # User Personalization API
 # ---------------------------
