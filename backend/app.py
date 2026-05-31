@@ -239,6 +239,7 @@ def webhook():
     wa_from = str(payload.get("from") or "").strip()
     body = str(payload.get("body") or "").strip()
     message_id = payload.get("id")
+    push_name = str(payload.get("pushName") or "").strip() or None
 
     if not wa_from or not body:
         return jsonify({"ok": True, "ignored": True})
@@ -246,7 +247,7 @@ def webhook():
     conn = get_db()
 
     cleanup_expired_pending(conn)
-    upsert_user(conn, wa_id=wa_from, display_name=None, timezone_name=settings.default_timezone)
+    upsert_user(conn, wa_id=wa_from, display_name=push_name, timezone_name=settings.default_timezone)
     add_conversation(conn, wa_from, "in", body, message_id=message_id)
 
     # --- Away mode toggle command ---

@@ -230,9 +230,28 @@ async function connectToWhatsApp() {
           ?? m.message?.buttonsResponseMessage?.selectedButtonId
           ?? m.message?.listResponseMessage?.singleSelectReply?.selectedRowId
           ?? "";
+        const pushName = m.pushName ?? null;
+
+        let resolvedFrom = from;
+        if (from.endsWith("@lid")) {
+          try {
+            const contacts = await sock.store?.contacts?.get?.(from) ?? {};
+            const phone = contacts[from]?.verifiedName ?? contacts[from]?.notify ?? null;
+            if (phone) resolvedFrom = phone;
+          } catch {}
+          if (resolvedFrom === from) {
+            try {
+              const storeContacts = Object.values(await sock.store?.contacts?.all?.() ?? []);
+              const match = storeContacts.find(c => c.id === from);
+              if (match?.notify) resolvedFrom = match.notify;
+            } catch {}
+          }
+        }
+
         const payload = {
           id: m.key.id ?? null,
-          from,
+          from: resolvedFrom,
+          pushName,
           body,
           timestamp: m.messageTimestamp ? new Date(Number(m.messageTimestamp) * 1000).toISOString() : null,
           type: "text",
