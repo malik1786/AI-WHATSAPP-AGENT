@@ -17,7 +17,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const GATEWAY_PORT = parseInt(process.env.GATEWAY_PORT ?? "3001", 10);
-const BACKEND_WEBHOOK_URL = process.env.BACKEND_WEBHOOK_URL ?? "http://127.0.0.1:5000/webhook";
+const BACKEND_WEBHOOK_URL = (() => {
+  let url = process.env.BACKEND_WEBHOOK_URL ?? "http://127.0.0.1:5000/webhook";
+  if (url.startsWith("//")) url = "https:" + url;
+  if (!url.startsWith("http://") && !url.startsWith("https://")) url = "https://" + url;
+  return url;
+})();
 const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN ?? "";
 const AUTH_PATH = process.env.WWEBJS_AUTH_PATH ?? ".wwebjs_auth";
 const AUTH_DIR = path.resolve(AUTH_PATH);
