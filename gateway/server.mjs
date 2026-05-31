@@ -163,7 +163,6 @@ async function connectToWhatsApp() {
         if (connectTimeout) { clearTimeout(connectTimeout); connectTimeout = null; }
         console.log("\n[WA] QR received — scan with WhatsApp:");
         qrcodeTerminal.generate(qr, { small: true });
-        resetStuckWatchdog();
       }
 
       if (connection === "close") {
@@ -187,16 +186,14 @@ async function connectToWhatsApp() {
         if (isLoggedOut || isBadSession || isMultideviceMismatch) {
           console.log("[WA] Clearing auth state (code:", statusCode, ")");
           clearAuthState(authDir);
-          lastQr = null;
         } else if (statusCode === undefined) {
           console.log("[WA] Network/connection error — keeping auth, will retry");
         }
 
         if (isLoggedOut || isConnectionReplaced) {
-          console.log("[WA] Session lost — clearing state and will auto-reset in 5s.");
+          console.log("[WA] Stopped — not reconnecting. Scan QR or pairing code to re-link.");
           lastQr = null;
           connecting = false;
-          setTimeout(() => { resetConnection(); }, 5000);
           return;
         }
 
@@ -214,7 +211,6 @@ async function connectToWhatsApp() {
         reconnectAttempts = 0;
         connecting = false;
         if (connectTimeout) { clearTimeout(connectTimeout); connectTimeout = null; }
-        if (stuckWatchdog) { clearTimeout(stuckWatchdog); stuckWatchdog = null; }
         console.log("[WA] Connected! User:", userInfo?.name ?? "unknown");
       }
     });
@@ -250,19 +246,6 @@ async function connectToWhatsApp() {
     const delay = Math.min(5000 * reconnectAttempts, MAX_RECONNECT_DELAY);
     console.log(`[WA] Retrying in ${delay}ms...`);
     setTimeout(connectToWhatsApp, delay);
-  }
-}
-
-let stuckWatchdog = null;
-function resetStuckWatchdog() {
-  if (stuckWatchdog) clearTimeout(stuckWatchdog);
-  if (!ready && !connecting) {
-    stuckWatchdog = setTimeout(() => {
-      if (!ready && !connecting && lastQr) {
-        console.log("[WA] Watchdog: stuck with stale QR for 60s — auto-resetting");
-        resetConnection();
-      }
-    }, 60000);
   }
 }
 
