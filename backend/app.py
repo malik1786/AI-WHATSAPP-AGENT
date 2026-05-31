@@ -7,7 +7,7 @@ from flask import Flask, jsonify, request, send_from_directory, g
 from flask_cors import CORS
 
 from config import load_settings
-from auth import hash_password, verify_password, create_token, require_auth
+from auth import hash_password, verify_password, create_token, require_auth, verify_google_token, GOOGLE_CLIENT_ID
 from db import (
     connect,
     init_schema,
@@ -138,6 +138,54 @@ def auth_login():
 @require_auth
 def auth_me():
     return jsonify({"id": request.user_id, "email": request.user_email})
+
+
+@app.get("/api/auth/google/client-id")
+def auth_google_client_id():
+    return jsonify({"clientId": GOOGLE_CLIENT_ID})
+
+
+@app.post("/api/auth/google")
+async def auth_google():
+    data = request.get_json(silent=True) or {}
+    id_token = str(data.get("credential") or "").strip()
+    if not id_token:
+        return jsonify({"error": "Missing Google credential"}), 400
+
+    google_user = await verify_google_token(id_token)
+    if not google_user:
+        return jsonify({"error": "Invalid Google token"}), 401
+
+    email = google_user["email"].lower()
+    name = google_user["name"]
+    conn = get_db()
+
+    if USE_POSTGREST:
+        rows = _rest_get("app_users", f"email=eq.{email}&select=id")
+        row = rows[0] if rows else None
+    else:
+        cur = conn.execute("SELECT id FROM app_users WHERE email=?", (email,))
+        row = cur.fetchone()
+        row = {"id": row["id"]} if row else None
+
+    if row:
+        user_id = row["id"]
+        if USE_POSTGREST:
+            _rest_update("app_users", {"display_name": name}, f"id=eq.{user_id}")
+        else:
+            conn.execute("UPDATE app_users SET display_name=? WHERE id=?", (name, user_id))
+            conn.commit()
+    else:
+        if USE_POSTGREST:
+            result = _rest_insert("app_users", {"email": email, "password_hash": "google_oauth", "display_name": name})
+            user_id = result[0]["id"] if result else 0
+        else:
+            cur = conn.execute("INSERT INTO app_users (email, password_hash, display_name) VALUES (?, ?, ?)", (email, "google_oauth", name))
+            conn.commit()
+            user_id = cur.lastrowid
+
+    token = create_token(user_id, email, name)
+    return jsonify({"token": token, "email": email, "name": name, "id": user_id})
 
 
 # ---------------------------

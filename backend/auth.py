@@ -6,6 +6,8 @@ import time
 from functools import wraps
 
 SECRET_KEY = os.getenv("JWT_SECRET", "wa-agent-secret-key-change-in-production")
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 
 def hash_password(password: str) -> str:
     salt = os.urandom(16).hex()
@@ -20,9 +22,9 @@ def verify_password(password: str, stored: str) -> bool:
     except Exception:
         return False
 
-def create_token(user_id: int, email: str) -> str:
+def create_token(user_id: int, email: str, name: str = "") -> str:
     import json, base64
-    payload = {"uid": user_id, "email": email, "exp": int(time.time()) + 86400 * 30}
+    payload = {"uid": user_id, "email": email, "name": name, "exp": int(time.time()) + 86400 * 30}
     data = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
     sig = hmac.new(SECRET_KEY.encode(), data.encode(), hashlib.sha256).hexdigest()[:32]
     return f"{data}.{sig}"
@@ -54,5 +56,28 @@ def require_auth(f):
             return jsonify({"error": "invalid token"}), 401
         request.user_id = user["uid"]
         request.user_email = user["email"]
+        request.user_name = user.get("name", "")
         return f(*args, **kwargs)
     return decorated
+
+async def verify_google_token(id_token: str) -> dict | None:
+    """Verify Google ID token and return user info."""
+    import json
+    from urllib.request import urlopen, Request
+    try:
+        # Get Google's public keys
+        req = Request("https://oauth2.googleapis.com/tokeninfo?id_token=" + id_token)
+        with urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+            if data.get("aud") != GOOGLE_CLIENT_ID:
+                return None
+            if int(data.get("exp", 0)) < time.time():
+                return None
+            return {
+                "email": data["email"],
+                "name": data.get("name", ""),
+                "picture": data.get("picture", ""),
+                "google_id": data["sub"],
+            }
+    except Exception:
+        return None

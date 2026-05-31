@@ -133,4 +133,10 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
   authMe: () => request<{ id: number; email: string }>("/api/auth/me"),
+  authGoogle: (credential: string) =>
+    request<{ token: string; email: string; name: string; id: number }>("/api/auth/google", {
+      method: "POST",
+      body: JSON.stringify({ credential }),
+    }),
+  authGoogleClientId: () => request<{ clientId: string }>("/api/auth/google/client-id"),
 };
