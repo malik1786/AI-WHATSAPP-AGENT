@@ -276,13 +276,13 @@ class ConfidenceScorer:
         
         # Factor 1: Message type
         if msg_type == "time":
-            score = 99.0
+            score = 100.0
             reasons.append("time_query")
         elif msg_type == "casual":
-            score = 85.0
+            score = 100.0
             reasons.append("casual_message")
         elif msg_type == "factual":
-            score = 75.0
+            score = 100.0
             reasons.append("factual_search")
         elif msg_type == "decision":
             score = 30.0
