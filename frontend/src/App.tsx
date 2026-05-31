@@ -111,8 +111,8 @@ export default function App() {
           }
           lastQrRef.current = qrVal;
 
-          if (staleQrCountRef.current >= 15) {
-            console.log("[GW QR] stale QR detected, auto-resetting");
+          if (staleQrCountRef.current >= 60) {
+            console.log("[GW QR] stale QR for 2+ min, auto-resetting");
             setGatewayStatusText("QR expired — resetting...");
             setQrText(null);
             staleQrCountRef.current = 0;
@@ -121,11 +121,7 @@ export default function App() {
             return;
           }
 
-          if (staleQrCountRef.current >= 8) {
-            setGatewayStatusText("QR may be stale — resetting...");
-          } else {
-            setGatewayStatusText("Scan QR to connect");
-          }
+          setGatewayStatusText("Scan QR to connect");
           setQrText(qrVal);
         } catch (e: any) {
           console.error("[GW QR] error:", e?.status, e?.message, e?.payload);
