@@ -7,38 +7,12 @@ services:
     startCommand: cd gateway && node server.mjs
     envVars:
       - key: BACKEND_WEBHOOK_URL
-        value: http://whatsapp-agent-backend:5000/webhook
+        value: https://whatsapp-agent-bay.vercel.app/webhook
       - key: BACKEND_API_URL
-        value: http://whatsapp-agent-backend:5000
+        value: https://whatsapp-agent-bay.vercel.app
       - key: GATEWAY_TOKEN
         value: mysecrettoken123
       - key: GATEWAY_PORT
         value: 3001
       - key: WWEBJS_AUTH_PATH
         value: /tmp/.wwebjs_auth
-
-  - type: web
-    name: whatsapp-agent-backend
-    runtime: python
-    plan: free
-    buildCommand: cd backend && pip install -r requirements.txt
-    startCommand: cd backend && mkdir -p data && python app.py
-    envVars:
-      - key: GROQ_API_KEY
-        sync: false
-      - key: GROQ_MODEL
-        value: openai/gpt-oss-120b
-      - key: DB_PATH
-        value: data/agent.db
-      - key: GATEWAY_BASE_URL
-        value: http://whatsapp-agent-gateway:3001
-      - key: GATEWAY_TOKEN
-        value: mysecrettoken123
-      - key: REPLY_ONLY_MODE
-        value: "false"
-      - key: DEMO_CHAT_ID
-        value: demo
-      - key: DEMO_CHAT_NAME
-        value: vhot ai agent
-      - key: BACKEND_PORT
-        value: 5000
